@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -27,6 +28,11 @@ const (
 
 var (
 	startedAt = time.Now()
+)
+
+var (
+	lastPlayerMu sync.RWMutex
+	lastPlayer   string
 )
 
 type Config struct {
@@ -185,7 +191,40 @@ func playerStatusHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func playPauseHandler(w http.ResponseWriter, r *http.Request) {
-	controlHandler(w, r, "org.mpris.MediaPlayer2.Player.PlayPause")
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	target := r.URL.Query().Get("player")
+	info, err := pickPlayer(ctx, target)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("select player: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	method := "org.mpris.MediaPlayer2.Player.Play"
+	action := "play"
+	if strings.EqualFold(info.PlaybackStatus, "Playing") {
+		method = "org.mpris.MediaPlayer2.Player.Pause"
+		action = "pause"
+	}
+
+	if err := callPlayerMethod(ctx, info.BusName, method); err != nil {
+		// Fallback to PlayPause for odd players that only implement the toggle.
+		if err2 := callPlayerMethod(ctx, info.BusName, "org.mpris.MediaPlayer2.Player.PlayPause"); err2 != nil {
+			http.Error(w, fmt.Sprintf("call %s (fallback PlayPause also failed): %v / %v", method, err, err2), http.StatusInternalServerError)
+			return
+		}
+		action = "toggle"
+		method = "org.mpris.MediaPlayer2.Player.PlayPause"
+	}
+
+	setLastPlayer(info.BusName)
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"player": info.Identity,
+		"action": action,
+		"status": "ok",
+	})
 }
 
 func nextHandler(w http.ResponseWriter, r *http.Request) {
@@ -211,6 +250,8 @@ func controlHandler(w http.ResponseWriter, r *http.Request, method string) {
 		http.Error(w, fmt.Sprintf("call %s: %v", method, err), http.StatusInternalServerError)
 		return
 	}
+
+	setLastPlayer(info.BusName)
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"player": info.Identity,
@@ -278,6 +319,13 @@ func pickPlayer(ctx context.Context, preferred string) (playerInfo, error) {
 		}
 		return playerInfo{}, fmt.Errorf("player %q not found", preferred)
 	}
+	if last := getLastPlayer(); last != "" {
+		for _, p := range players {
+			if p.BusName == last || p.Identity == last {
+				return p, nil
+			}
+		}
+	}
 	for _, p := range players {
 		if p.IsActive {
 			return p, nil
@@ -323,12 +371,29 @@ func fetchPlayerInfo(ctx context.Context, conn *dbus.Conn, busName string) (play
 }
 
 func markActive(players []playerInfo) []playerInfo {
+	if last := getLastPlayer(); last != "" {
+		for i, p := range players {
+			if p.BusName == last || p.Identity == last {
+				players[i].IsActive = true
+				return players
+			}
+		}
+	}
+
 	for i, p := range players {
 		if strings.EqualFold(p.PlaybackStatus, "Playing") {
 			players[i].IsActive = true
 			return players
 		}
 	}
+
+	for i, p := range players {
+		if strings.EqualFold(p.PlaybackStatus, "Paused") {
+			players[i].IsActive = true
+			return players
+		}
+	}
+
 	if len(players) > 0 {
 		players[0].IsActive = true
 	}
@@ -618,6 +683,18 @@ func runCmd(ctx context.Context, name string, args ...string) (string, error) {
 		return "", fmt.Errorf("%s %v: %v (%s)", name, args, err, strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func setLastPlayer(busName string) {
+	lastPlayerMu.Lock()
+	defer lastPlayerMu.Unlock()
+	lastPlayer = busName
+}
+
+func getLastPlayer() string {
+	lastPlayerMu.RLock()
+	defer lastPlayerMu.RUnlock()
+	return lastPlayer
 }
 
 func requireToken(token string, next http.Handler) http.Handler {
