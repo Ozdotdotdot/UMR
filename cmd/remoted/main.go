@@ -2,15 +2,19 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,11 +39,16 @@ var (
 	lastPlayer   string
 )
 
+var (
+	artCacheDir string
+)
+
 type Config struct {
 	BindAddr string
 	Port     int
 	Token    string
 	Version  string
+	ArtCache string
 }
 
 type healthResponse struct {
@@ -54,6 +63,10 @@ type healthResponse struct {
 
 func main() {
 	cfg := loadConfig()
+	artCacheDir = cfg.ArtCache
+	if err := os.MkdirAll(artCacheDir, 0o755); err != nil {
+		log.Fatalf("failed to create art cache dir: %v", err)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthHandler(cfg))
@@ -64,6 +77,7 @@ func main() {
 	mux.Handle("/player/next", requireToken(cfg.Token, http.HandlerFunc(nextHandler)))
 	mux.Handle("/player/prev", requireToken(cfg.Token, http.HandlerFunc(previousHandler)))
 	mux.Handle("/volume", requireToken(cfg.Token, http.HandlerFunc(volumeHandler)))
+	mux.Handle("/art/", requireToken(cfg.Token, http.HandlerFunc(artHandler)))
 
 	srv := &http.Server{
 		Addr:    net.JoinHostPort(cfg.BindAddr, strconv.Itoa(cfg.Port)),
@@ -99,6 +113,7 @@ func loadConfig() Config {
 		Port:     getenvInt("REMOTED_PORT", defaultPort),
 		Token:    os.Getenv("REMOTED_TOKEN"),
 		Version:  getenvDefault("REMOTED_VERSION", defaultVersion),
+		ArtCache: getenvDefault("REMOTED_ART_CACHE", defaultArtCacheDir()),
 	}
 	return cfg
 }
@@ -165,6 +180,7 @@ type playerInfo struct {
 	Artist         string `json:"artist,omitempty"`
 	Album          string `json:"album,omitempty"`
 	ArtURL         string `json:"art_url,omitempty"`
+	ArtURLProxy    string `json:"art_url_proxy,omitempty"`
 }
 
 func playersHandler(w http.ResponseWriter, r *http.Request) {
@@ -462,6 +478,9 @@ func populateMetadata(info *playerInfo, meta dbus.Variant) {
 	}
 	if art, ok := raw["mpris:artUrl"]; ok {
 		info.ArtURL = asString(art)
+		if proxied := proxyArtURL(info.ArtURL); proxied != "" {
+			info.ArtURLProxy = proxied
+		}
 	}
 	if artist, ok := raw["xesam:artist"]; ok {
 		info.Artist = firstString(artist)
@@ -705,6 +724,122 @@ func getLastPlayer() string {
 	lastPlayerMu.RLock()
 	defer lastPlayerMu.RUnlock()
 	return lastPlayer
+}
+
+func defaultArtCacheDir() string {
+	if dir, err := os.UserCacheDir(); err == nil && dir != "" {
+		return filepath.Join(dir, "umr", "art")
+	}
+	return filepath.Join(os.TempDir(), "umr", "art")
+}
+
+func proxyArtURL(artURL string) string {
+	u, err := url.Parse(artURL)
+	if err != nil {
+		return ""
+	}
+	if u.Scheme != "file" {
+		return ""
+	}
+
+	srcPath := filepath.Clean(u.Path)
+	if !isPathAllowed(srcPath) {
+		return ""
+	}
+
+	cacheName, err := cacheArt(srcPath)
+	if err != nil {
+		log.Printf("warn: cache art failed for %s: %v", srcPath, err)
+		return ""
+	}
+	return "/art/" + cacheName
+}
+
+func cacheArt(srcPath string) (string, error) {
+	stat, err := os.Stat(srcPath)
+	if err != nil {
+		return "", err
+	}
+
+	hash := sha1.New()
+	_, _ = io.WriteString(hash, srcPath)
+	_, _ = io.WriteString(hash, stat.ModTime().UTC().String())
+	_, _ = io.WriteString(hash, fmt.Sprintf("%d", stat.Size()))
+	sum := fmt.Sprintf("%x", hash.Sum(nil))
+
+	ext := filepath.Ext(srcPath)
+	if ext == "" {
+		ext = ".img"
+	}
+	cacheName := sum + ext
+	dest := filepath.Join(artCacheDir, cacheName)
+
+	if dstInfo, err := os.Stat(dest); err == nil {
+		if dstInfo.ModTime().After(stat.ModTime()) || dstInfo.Size() == stat.Size() {
+			return cacheName, nil
+		}
+	}
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return "", err
+	}
+
+	tmpDest := dest + ".tmp"
+	dst, err := os.Create(tmpDest)
+	if err != nil {
+		return "", err
+	}
+
+	_, err = io.Copy(dst, src)
+	closeErr := dst.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(tmpDest)
+		return "", err
+	}
+
+	if err := os.Rename(tmpDest, dest); err != nil {
+		return "", err
+	}
+
+	return cacheName, nil
+}
+
+func isPathAllowed(p string) bool {
+	allowed := []string{"/tmp", "/var/tmp"}
+	for _, prefix := range allowed {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func artHandler(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/art/")
+	if id == "" {
+		http.NotFound(w, r)
+		return
+	}
+	name := filepath.Base(id)
+	path := filepath.Join(artCacheDir, name)
+	if !strings.HasPrefix(path, artCacheDir) {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	if _, err := os.Stat(path); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFile(w, r, path)
 }
 
 func requireToken(token string, next http.Handler) http.Handler {
