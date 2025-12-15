@@ -4,14 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
+
+	"github.com/godbus/dbus/v5"
 )
 
 const (
@@ -46,6 +51,12 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", healthHandler(cfg))
+	mux.Handle("/players", requireToken(cfg.Token, http.HandlerFunc(playersHandler)))
+	mux.Handle("/player/status", requireToken(cfg.Token, http.HandlerFunc(playerStatusHandler)))
+	mux.Handle("/player/playpause", requireToken(cfg.Token, http.HandlerFunc(playPauseHandler)))
+	mux.Handle("/player/next", requireToken(cfg.Token, http.HandlerFunc(nextHandler)))
+	mux.Handle("/player/prev", requireToken(cfg.Token, http.HandlerFunc(previousHandler)))
+	mux.Handle("/volume", requireToken(cfg.Token, http.HandlerFunc(volumeHandler)))
 
 	srv := &http.Server{
 		Addr:    net.JoinHostPort(cfg.BindAddr, strconv.Itoa(cfg.Port)),
@@ -133,6 +144,480 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+type playerInfo struct {
+	BusName        string `json:"bus_name"`
+	Identity       string `json:"identity"`
+	PlaybackStatus string `json:"playback_status"`
+	CanControl     bool   `json:"can_control"`
+	IsActive       bool   `json:"is_active"`
+	PositionMillis int64  `json:"position_millis,omitempty"`
+	LengthMillis   int64  `json:"length_millis,omitempty"`
+	Title          string `json:"title,omitempty"`
+	Artist         string `json:"artist,omitempty"`
+	Album          string `json:"album,omitempty"`
+}
+
+func playersHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	players, err := listPlayers(ctx)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("list players: %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, players)
+}
+
+func playerStatusHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	target := r.URL.Query().Get("player")
+	player, err := pickPlayer(ctx, target)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("select player: %v", err), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, player)
+}
+
+func playPauseHandler(w http.ResponseWriter, r *http.Request) {
+	controlHandler(w, r, "org.mpris.MediaPlayer2.Player.PlayPause")
+}
+
+func nextHandler(w http.ResponseWriter, r *http.Request) {
+	controlHandler(w, r, "org.mpris.MediaPlayer2.Player.Next")
+}
+
+func previousHandler(w http.ResponseWriter, r *http.Request) {
+	controlHandler(w, r, "org.mpris.MediaPlayer2.Player.Previous")
+}
+
+func controlHandler(w http.ResponseWriter, r *http.Request, method string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	target := r.URL.Query().Get("player")
+	info, err := pickPlayer(ctx, target)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("select player: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if err := callPlayerMethod(ctx, info.BusName, method); err != nil {
+		http.Error(w, fmt.Sprintf("call %s: %v", method, err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"player": info.Identity,
+		"action": method,
+		"status": "ok",
+	})
+}
+
+func callPlayerMethod(ctx context.Context, busName, method string) error {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		return fmt.Errorf("session bus: %w", err)
+	}
+	defer conn.Close()
+
+	obj := conn.Object(busName, "/org/mpris/MediaPlayer2")
+	call := obj.CallWithContext(ctx, method, 0)
+	if call.Err != nil {
+		return call.Err
+	}
+	return nil
+}
+
+func listPlayers(ctx context.Context) ([]playerInfo, error) {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		return nil, fmt.Errorf("session bus: %w", err)
+	}
+	defer conn.Close()
+
+	names, err := listNames(ctx, conn)
+	if err != nil {
+		return nil, fmt.Errorf("list names: %w", err)
+	}
+
+	var players []playerInfo
+	for _, name := range names {
+		if !strings.HasPrefix(name, "org.mpris.MediaPlayer2.") {
+			continue
+		}
+		info, err := fetchPlayerInfo(ctx, conn, name)
+		if err != nil {
+			log.Printf("warn: skipping player %s: %v", name, err)
+			continue
+		}
+		players = append(players, info)
+	}
+	players = markActive(players)
+	return players, nil
+}
+
+func pickPlayer(ctx context.Context, preferred string) (playerInfo, error) {
+	players, err := listPlayers(ctx)
+	if err != nil {
+		return playerInfo{}, err
+	}
+	if len(players) == 0 {
+		return playerInfo{}, fmt.Errorf("no players found")
+	}
+	if preferred != "" {
+		for _, p := range players {
+			if p.BusName == preferred || p.Identity == preferred {
+				return p, nil
+			}
+		}
+		return playerInfo{}, fmt.Errorf("player %q not found", preferred)
+	}
+	for _, p := range players {
+		if p.IsActive {
+			return p, nil
+		}
+	}
+	return players[0], nil
+}
+
+func fetchPlayerInfo(ctx context.Context, conn *dbus.Conn, busName string) (playerInfo, error) {
+	obj := conn.Object(busName, "/org/mpris/MediaPlayer2")
+
+	identityVariant, err := obj.GetProperty("org.mpris.MediaPlayer2.Identity")
+	if err != nil {
+		return playerInfo{}, fmt.Errorf("identity: %w", err)
+	}
+	playbackVariant, err := obj.GetProperty("org.mpris.MediaPlayer2.Player.PlaybackStatus")
+	if err != nil {
+		return playerInfo{}, fmt.Errorf("playback: %w", err)
+	}
+	canControlVariant, err := obj.GetProperty("org.mpris.MediaPlayer2.Player.CanControl")
+	if err != nil {
+		return playerInfo{}, fmt.Errorf("canControl: %w", err)
+	}
+
+	info := playerInfo{
+		BusName:        busName,
+		Identity:       asString(identityVariant),
+		PlaybackStatus: asString(playbackVariant),
+		CanControl:     asBool(canControlVariant),
+	}
+
+	metaVariant, err := obj.GetProperty("org.mpris.MediaPlayer2.Player.Metadata")
+	if err == nil {
+		populateMetadata(&info, metaVariant)
+	}
+
+	positionVariant, err := obj.GetProperty("org.mpris.MediaPlayer2.Player.Position")
+	if err == nil {
+		info.PositionMillis = asInt64(positionVariant) / 1000
+	}
+
+	return info, nil
+}
+
+func markActive(players []playerInfo) []playerInfo {
+	for i, p := range players {
+		if strings.EqualFold(p.PlaybackStatus, "Playing") {
+			players[i].IsActive = true
+			return players
+		}
+	}
+	if len(players) > 0 {
+		players[0].IsActive = true
+	}
+	return players
+}
+
+func listNames(ctx context.Context, conn *dbus.Conn) ([]string, error) {
+	obj := conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
+	var names []string
+	call := obj.CallWithContext(ctx, "org.freedesktop.DBus.ListNames", 0)
+	if call.Err != nil {
+		return nil, call.Err
+	}
+	if err := call.Store(&names); err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+func asString(v dbus.Variant) string {
+	if s, ok := v.Value().(string); ok {
+		return s
+	}
+	return ""
+}
+
+func asBool(v dbus.Variant) bool {
+	if b, ok := v.Value().(bool); ok {
+		return b
+	}
+	return false
+}
+
+func asInt64(v dbus.Variant) int64 {
+	switch val := v.Value().(type) {
+	case int64:
+		return val
+	case int32:
+		return int64(val)
+	case uint64:
+		return int64(val)
+	case uint32:
+		return int64(val)
+	default:
+		return 0
+	}
+}
+
+func populateMetadata(info *playerInfo, meta dbus.Variant) {
+	raw, ok := meta.Value().(map[string]dbus.Variant)
+	if !ok {
+		return
+	}
+	if title, ok := raw["xesam:title"]; ok {
+		info.Title = asString(title)
+	}
+	if album, ok := raw["xesam:album"]; ok {
+		info.Album = asString(album)
+	}
+	if artist, ok := raw["xesam:artist"]; ok {
+		info.Artist = firstString(artist)
+	}
+	if length, ok := raw["mpris:length"]; ok {
+		info.LengthMillis = asInt64(length) / 1000
+	}
+}
+
+func firstString(v dbus.Variant) string {
+	switch val := v.Value().(type) {
+	case []string:
+		if len(val) > 0 {
+			return val[0]
+		}
+	case []interface{}:
+		for _, item := range val {
+			if s, ok := item.(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+type volumeResponse struct {
+	Backend string  `json:"backend"`
+	Volume  float64 `json:"volume"`
+	Muted   bool    `json:"muted"`
+}
+
+type setVolumeRequest struct {
+	Absolute *float64 `json:"absolute,omitempty"`
+	Delta    *float64 `json:"delta,omitempty"`
+	Mute     *bool    `json:"mute,omitempty"`
+}
+
+func volumeHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		resp, err := getVolume(r.Context())
+		if err != nil {
+			http.Error(w, fmt.Sprintf("get volume: %v", err), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	case http.MethodPost:
+		var req setVolumeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if req.Absolute == nil && req.Delta == nil && req.Mute == nil {
+			http.Error(w, "provide absolute, delta, or mute", http.StatusBadRequest)
+			return
+		}
+		resp, err := setVolume(r.Context(), req)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("set volume: %v", err), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func getVolume(ctx context.Context) (volumeResponse, error) {
+	if resp, err := getVolumeWPCTL(ctx); err == nil {
+		return resp, nil
+	}
+	return getVolumePACTL(ctx)
+}
+
+func setVolume(ctx context.Context, req setVolumeRequest) (volumeResponse, error) {
+	if resp, err := setVolumeWPCTL(ctx, req); err == nil {
+		return resp, nil
+	}
+	return setVolumePACTL(ctx, req)
+}
+
+func getVolumeWPCTL(ctx context.Context) (volumeResponse, error) {
+	out, err := runCmd(ctx, "wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@")
+	if err != nil {
+		return volumeResponse{}, err
+	}
+	vol, muted, err := parseWPCTLVolume(out)
+	if err != nil {
+		return volumeResponse{}, err
+	}
+	return volumeResponse{Backend: "wpctl", Volume: vol, Muted: muted}, nil
+}
+
+func setVolumeWPCTL(ctx context.Context, req setVolumeRequest) (volumeResponse, error) {
+	current, err := getVolumeWPCTL(ctx)
+	if err != nil {
+		return volumeResponse{}, err
+	}
+
+	if req.Mute != nil {
+		val := "0"
+		if *req.Mute {
+			val = "1"
+		}
+		if _, err := runCmd(ctx, "wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", val); err != nil {
+			return volumeResponse{}, err
+		}
+		current.Muted = *req.Mute
+	}
+
+	newVolume := current.Volume
+	if req.Absolute != nil {
+		newVolume = *req.Absolute
+	} else if req.Delta != nil {
+		newVolume = current.Volume + *req.Delta
+	}
+	newVolume = clamp(newVolume, 0.0, 1.5)
+
+	if req.Absolute != nil || req.Delta != nil {
+		if _, err := runCmd(ctx, "wpctl", "set-volume", "--limit", "1.5", "@DEFAULT_AUDIO_SINK@", fmt.Sprintf("%.3f", newVolume)); err != nil {
+			return volumeResponse{}, err
+		}
+		current.Volume = newVolume
+	}
+
+	return current, nil
+}
+
+func getVolumePACTL(ctx context.Context) (volumeResponse, error) {
+	out, err := runCmd(ctx, "pactl", "get-sink-volume", "@DEFAULT_SINK@")
+	if err != nil {
+		return volumeResponse{}, err
+	}
+	mutedOut, _ := runCmd(ctx, "pactl", "get-sink-mute", "@DEFAULT_SINK@")
+
+	vol, err := parsePACTLVolume(out)
+	if err != nil {
+		return volumeResponse{}, err
+	}
+	muted := strings.Contains(strings.ToLower(mutedOut), "yes")
+
+	return volumeResponse{Backend: "pactl", Volume: vol, Muted: muted}, nil
+}
+
+func setVolumePACTL(ctx context.Context, req setVolumeRequest) (volumeResponse, error) {
+	current, err := getVolumePACTL(ctx)
+	if err != nil {
+		return volumeResponse{}, err
+	}
+
+	if req.Mute != nil {
+		val := "0"
+		if *req.Mute {
+			val = "1"
+		}
+		if _, err := runCmd(ctx, "pactl", "set-sink-mute", "@DEFAULT_SINK@", val); err != nil {
+			return volumeResponse{}, err
+		}
+		current.Muted = *req.Mute
+	}
+
+	newVolume := current.Volume
+	if req.Absolute != nil {
+		newVolume = *req.Absolute
+	} else if req.Delta != nil {
+		newVolume = current.Volume + *req.Delta
+	}
+	newVolume = clamp(newVolume, 0.0, 1.5)
+
+	if req.Absolute != nil || req.Delta != nil {
+		// pactl expects percentage; convert factor (1.0 = 100%).
+		percent := int(newVolume * 100)
+		if _, err := runCmd(ctx, "pactl", "set-sink-volume", "@DEFAULT_SINK@", fmt.Sprintf("%d%%", percent)); err != nil {
+			return volumeResponse{}, err
+		}
+		current.Volume = newVolume
+	}
+
+	return current, nil
+}
+
+func parseWPCTLVolume(out string) (float64, bool, error) {
+	// Example: "Volume: 0.38 [MUTED]" or "Volume: 1.04"
+	fields := strings.Fields(out)
+	if len(fields) < 2 {
+		return 0, false, fmt.Errorf("unexpected output: %q", out)
+	}
+	val, err := strconv.ParseFloat(fields[1], 64)
+	if err != nil {
+		return 0, false, fmt.Errorf("parse volume: %w", err)
+	}
+	muted := strings.Contains(strings.ToUpper(out), "MUTED")
+	return val, muted, nil
+}
+
+func parsePACTLVolume(out string) (float64, error) {
+	// Example: "Volume: front-left: 65536 / 100% / 0.00 dB,   front-right: 65536 / 100% / 0.00 dB"
+	idx := strings.Index(out, "/")
+	if idx == -1 {
+		return 0, fmt.Errorf("unexpected pactl output: %q", out)
+	}
+	rest := out[idx+1:]
+	end := strings.Index(rest, "%")
+	if end == -1 {
+		return 0, fmt.Errorf("unexpected pactl output: %q", out)
+	}
+	percentStr := strings.TrimSpace(rest[:end])
+	percent, err := strconv.Atoi(percentStr)
+	if err != nil {
+		return 0, fmt.Errorf("parse pactl percent: %w", err)
+	}
+	return float64(percent) / 100.0, nil
+}
+
+func clamp(val, min, max float64) float64 {
+	if val < min {
+		return min
+	}
+	if val > max {
+		return max
+	}
+	return val
+}
+
+func runCmd(ctx context.Context, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s %v: %v (%s)", name, args, err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func requireToken(token string, next http.Handler) http.Handler {
