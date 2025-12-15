@@ -59,6 +59,7 @@ func main() {
 	mux.HandleFunc("/healthz", healthHandler(cfg))
 	mux.Handle("/players", requireToken(cfg.Token, http.HandlerFunc(playersHandler)))
 	mux.Handle("/player/status", requireToken(cfg.Token, http.HandlerFunc(playerStatusHandler)))
+	mux.Handle("/nowplaying", requireToken(cfg.Token, http.HandlerFunc(nowPlayingHandler)))
 	mux.Handle("/player/playpause", requireToken(cfg.Token, http.HandlerFunc(playPauseHandler)))
 	mux.Handle("/player/next", requireToken(cfg.Token, http.HandlerFunc(nextHandler)))
 	mux.Handle("/player/prev", requireToken(cfg.Token, http.HandlerFunc(previousHandler)))
@@ -163,6 +164,7 @@ type playerInfo struct {
 	Title          string `json:"title,omitempty"`
 	Artist         string `json:"artist,omitempty"`
 	Album          string `json:"album,omitempty"`
+	ArtURL         string `json:"art_url,omitempty"`
 }
 
 func playersHandler(w http.ResponseWriter, r *http.Request) {
@@ -188,6 +190,11 @@ func playerStatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, player)
+}
+
+// nowPlayingHandler is a convenience alias for playerStatus without needing a query param.
+func nowPlayingHandler(w http.ResponseWriter, r *http.Request) {
+	playerStatusHandler(w, r)
 }
 
 func playPauseHandler(w http.ResponseWriter, r *http.Request) {
@@ -452,6 +459,9 @@ func populateMetadata(info *playerInfo, meta dbus.Variant) {
 	}
 	if album, ok := raw["xesam:album"]; ok {
 		info.Album = asString(album)
+	}
+	if art, ok := raw["mpris:artUrl"]; ok {
+		info.ArtURL = asString(art)
 	}
 	if artist, ok := raw["xesam:artist"]; ok {
 		info.Artist = firstString(artist)
