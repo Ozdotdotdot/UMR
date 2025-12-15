@@ -37,6 +37,10 @@ Response example:
 }
 ```
 
+## API
+
+See `docs/API.md` for endpoints, auth, and examples.
+
 ## Next steps (planned)
 
 - Token-authenticated control endpoints (MPRIS playback, PulseAudio/PipeWire volume)
