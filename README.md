@@ -33,19 +33,20 @@ tar -xf remoted-linux-amd64.tar.gz
 ```
 
 ## Configure / Run
-Env vars (all optional):
-- `REMOTED_BIND` — listen address (default `127.0.0.1`)
--, `REMOTED_PORT` — listen port (default `8080`)
-- `REMOTED_TOKEN` — when set, required for everything except `/healthz`
-- `REMOTED_ART_CACHE` — art cache dir (default `~/.cache/umr/art` or `/tmp/umr/art`)
+You can configure with env vars or flags (flags override env defaults):
+- `REMOTED_BIND` / `-bind` — listen address (default `127.0.0.1`)
+- `REMOTED_PORT` / `-port` — listen port (default `8080`)
+- `REMOTED_TOKEN` / `-token` — bearer token (required for everything except `/healthz` when set)
+- `REMOTED_ART_CACHE` / `-art-cache` — art cache dir (default `~/.cache/umr/art` or `/tmp/umr/art`)
+- `-version` (string) or `-v` (print version and exit)
 
 Examples:
 ```bash
-# local-only
+# local-only (env)
 REMOTED_TOKEN="choose-a-secret" remoted
 
-# LAN access
-REMOTED_BIND=0.0.0.0 REMOTED_TOKEN="choose-a-secret" remoted
+# LAN access (flag)
+remoted -bind=0.0.0.0 -token=choose-a-secret
 ```
 
 Visit the UI at `http://<host>:<port>/ui` (enter your token if set). WebSocket updates keep the page live; transport and volume controls call the API.

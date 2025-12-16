@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -52,11 +53,12 @@ var globalHub *wsHub
 var webFS embed.FS
 
 type Config struct {
-	BindAddr string
-	Port     int
-	Token    string
-	Version  string
-	ArtCache string
+	BindAddr     string
+	Port         int
+	Token        string
+	Version      string
+	ArtCache     string
+	PrintVersion bool
 }
 
 type healthResponse struct {
@@ -70,7 +72,11 @@ type healthResponse struct {
 }
 
 func main() {
-	cfg := loadConfig()
+	cfg := parseConfig()
+	if cfg.PrintVersion {
+		fmt.Printf("remoted %s\n", cfg.Version)
+		return
+	}
 	artCacheDir = cfg.ArtCache
 	if err := os.MkdirAll(artCacheDir, 0o755); err != nil {
 		log.Fatalf("failed to create art cache dir: %v", err)
@@ -134,13 +140,29 @@ func main() {
 	}
 }
 
-func loadConfig() Config {
-	cfg := Config{
-		BindAddr: getenvDefault("REMOTED_BIND", defaultBindAddress),
-		Port:     getenvInt("REMOTED_PORT", defaultPort),
-		Token:    os.Getenv("REMOTED_TOKEN"),
-		Version:  getenvDefault("REMOTED_VERSION", defaultVersion),
-		ArtCache: getenvDefault("REMOTED_ART_CACHE", defaultArtCacheDir()),
+func parseConfig() Config {
+	defaultBind := getenvDefault("REMOTED_BIND", defaultBindAddress)
+	defaultPort := getenvInt("REMOTED_PORT", defaultPort)
+	defaultToken := os.Getenv("REMOTED_TOKEN")
+	envVersion := getenvDefault("REMOTED_VERSION", defaultVersion)
+	defaultArt := getenvDefault("REMOTED_ART_CACHE", defaultArtCacheDir())
+
+	var cfg Config
+	flag.StringVar(&cfg.BindAddr, "bind", defaultBind, "bind address (default from REMOTED_BIND)")
+	flag.IntVar(&cfg.Port, "port", defaultPort, "port to listen on (default from REMOTED_PORT)")
+	flag.StringVar(&cfg.Token, "token", defaultToken, "bearer token for API/UI (default from REMOTED_TOKEN)")
+	flag.StringVar(&cfg.Version, "version", envVersion, "version string to report (default from REMOTED_VERSION)")
+	flag.StringVar(&cfg.ArtCache, "art-cache", defaultArt, "artwork cache directory (default from REMOTED_ART_CACHE)")
+	flag.BoolVar(&cfg.PrintVersion, "v", false, "print version and exit")
+
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: remoted [options]\n\n")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if cfg.Version == "" {
+		cfg.Version = defaultVersion
 	}
 	return cfg
 }
