@@ -86,6 +86,9 @@ function updateUI(info) {
   const art = info.art_url_proxy || info.art_url || "";
   artImg.src = art || "";
   statusLine.textContent = `Player: ${info.identity || info.bus_name || "auto"} | ${new Date().toLocaleTimeString()}`;
+  if (info.bus_name && info.bus_name !== currentPlayer) {
+    setCurrentPlayer(info.bus_name);
+  }
 }
 
 async function loadPlayers() {

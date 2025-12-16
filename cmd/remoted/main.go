@@ -404,13 +404,20 @@ func pickPlayer(ctx context.Context, preferred string) (playerInfo, error) {
 	if len(players) == 0 {
 		return playerInfo{}, fmt.Errorf("no players found")
 	}
+
+	recordIfPlaying := func(p playerInfo) playerInfo {
+		if strings.EqualFold(p.PlaybackStatus, "Playing") {
+			setLastPlayer(p.BusName)
+		}
+		return p
+	}
 	if preferred != "" {
 		var preferredPlayer *playerInfo
 		for i, p := range players {
 			if p.BusName == preferred || p.Identity == preferred {
 				preferredPlayer = &players[i]
 				if strings.EqualFold(p.PlaybackStatus, "Playing") {
-					return p, nil
+					return recordIfPlaying(p), nil
 				}
 				break
 			}
@@ -418,7 +425,7 @@ func pickPlayer(ctx context.Context, preferred string) (playerInfo, error) {
 		// If preferred is paused/stopped and another is playing, prefer the playing one.
 		for _, p := range players {
 			if strings.EqualFold(p.PlaybackStatus, "Playing") {
-				return p, nil
+				return recordIfPlaying(p), nil
 			}
 		}
 		if preferredPlayer != nil {
@@ -435,14 +442,14 @@ func pickPlayer(ctx context.Context, preferred string) (playerInfo, error) {
 	if last != "" {
 		for _, p := range players {
 			if (p.BusName == last || p.Identity == last) && playing(p) {
-				return p, nil
+				return recordIfPlaying(p), nil
 			}
 		}
 	}
 	// 2) Otherwise, choose any playing player.
 	for _, p := range players {
 		if playing(p) {
-			return p, nil
+			return recordIfPlaying(p), nil
 		}
 	}
 	// 3) If none playing, keep last if still present.
