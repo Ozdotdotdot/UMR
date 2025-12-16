@@ -12,6 +12,7 @@ const albumEl = el("album");
 const statusEl = el("status");
 const statusLine = el("status-line");
 const playPauseBtn = el("playpause");
+const playPauseIcon = el("playpause-icon");
 const prevBtn = el("prev");
 const nextBtn = el("next");
 const volDownBtn = el("vol-down");
@@ -81,9 +82,16 @@ function updateUI(info) {
   artistEl.textContent = info.artist || "";
   albumEl.textContent = info.album || "";
   statusEl.textContent = info.playback_status || "";
+  setPlayPauseIcon(info.playback_status);
   const art = info.art_url_proxy || info.art_url || "";
   artImg.src = art || "";
   statusLine.textContent = `Player: ${info.identity || info.bus_name || "auto"} | ${new Date().toLocaleTimeString()}`;
+}
+
+function setPlayPauseIcon(status) {
+  const isPlaying = (status || "").toLowerCase() === "playing";
+  playPauseIcon.classList.toggle("icon-play", !isPlaying);
+  playPauseIcon.classList.toggle("icon-pause", isPlaying);
 }
 
 async function loadPlayers() {
