@@ -11,6 +11,9 @@ const artistEl = el("artist");
 const albumEl = el("album");
 const statusEl = el("status");
 const statusLine = el("status-line");
+const positionSlider = el("position");
+const currentTimeEl = el("current-time");
+const totalTimeEl = el("total-time");
 const playPauseBtn = el("playpause");
 const playPauseIcon = el("playpause-icon");
 const replay10Btn = el("replay10");
@@ -28,6 +31,11 @@ let wsReconnectTimer;
 let lastPlayerPref = "";
 let currentPlayer = ""; // empty string means Auto mode (server decides)
 let isMuted = false;
+let lastPositionMs = 0;
+let durationMs = 0;
+let lastUpdateTs = 0;
+let isPlaying = false;
+let userScrubbing = false;
 
 function loadPrefs() {
   const host = localStorage.getItem("umr_host") || "http://127.0.0.1:8080";
@@ -85,6 +93,7 @@ function updateUI(info) {
   albumEl.textContent = info.album || "";
   statusEl.textContent = info.playback_status || "";
   setPlayPauseIcon(info.playback_status);
+  updateScrubber(info);
   const art = info.art_url_proxy || info.art_url || "";
   artImg.src = art || "";
   statusLine.textContent = `Player: ${info.identity || info.bus_name || "auto"} | ${new Date().toLocaleTimeString()}`;
@@ -103,6 +112,41 @@ function setMuteIcon(stateMuted) {
     : "/static/volume_up_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg";
   muteIcon.alt = isMuted ? "Volume muted" : "Volume up";
   muteBtn.setAttribute("aria-pressed", isMuted ? "true" : "false");
+}
+
+function updateScrubber(info) {
+  durationMs = info.length_millis || 0;
+  lastPositionMs = info.position_millis || 0;
+  lastUpdateTs = performance.now();
+  isPlaying = (info.playback_status || "").toLowerCase() === "playing";
+  positionSlider.max = durationMs;
+  positionSlider.disabled = durationMs === 0;
+  if (!userScrubbing) {
+    positionSlider.value = lastPositionMs;
+  }
+  renderTime(lastPositionMs, durationMs);
+}
+
+function renderTime(posMs, durMs) {
+  currentTimeEl.textContent = formatTime(posMs);
+  totalTimeEl.textContent = durMs ? formatTime(durMs) : "0:00";
+}
+
+function formatTime(ms) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function tick() {
+  if (!userScrubbing && isPlaying && durationMs > 0) {
+    const elapsed = performance.now() - lastUpdateTs;
+    const projected = Math.min(durationMs, lastPositionMs + elapsed);
+    positionSlider.value = projected;
+    renderTime(projected, durationMs);
+  }
+  requestAnimationFrame(tick);
 }
 
 async function syncVolume() {
@@ -243,6 +287,24 @@ async function bindControls() {
       statusLine.textContent = `Forward 10 failed: ${err.message}`;
     }
   };
+  positionSlider.addEventListener("input", (e) => {
+    userScrubbing = true;
+    const val = parseInt(e.target.value, 10) || 0;
+    renderTime(val, durationMs);
+  });
+  positionSlider.addEventListener("change", async (e) => {
+    const val = parseInt(e.target.value, 10) || 0;
+    const delta = val - lastPositionMs;
+    userScrubbing = false;
+    if (durationMs === 0) return;
+    try {
+      await postJSON("/player/seek", { delta_ms: delta }, playerParam());
+      lastPositionMs = val;
+      lastUpdateTs = performance.now();
+    } catch (err) {
+      statusLine.textContent = `Seek failed: ${err.message}`;
+    }
+  });
   volDownBtn.onclick = () => adjustVolume(-0.05);
   volUpBtn.onclick = () => adjustVolume(0.05);
   muteBtn.onclick = async () => {
@@ -289,6 +351,7 @@ async function init() {
   await loadPlayers();
   await syncVolume();
   startWS();
+  requestAnimationFrame(tick);
 }
 
 init().catch((err) => (statusLine.textContent = err.message));

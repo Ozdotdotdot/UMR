@@ -63,6 +63,23 @@ button:hover { background: #2d3a56; }
   background: var(--card);
 }
 
+.scrubber {
+  grid-template-columns: 1fr;
+  justify-items: stretch;
+  text-align: left;
+  gap: 8px;
+}
+.scrub-times {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 12px;
+}
+#position {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
 .art-wrap {
   width: clamp(200px, 30vw, 320px);
   height: clamp(200px, 30vw, 320px);
