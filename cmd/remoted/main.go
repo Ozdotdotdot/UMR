@@ -412,24 +412,10 @@ func pickPlayer(ctx context.Context, preferred string) (playerInfo, error) {
 		return p
 	}
 	if preferred != "" {
-		var preferredPlayer *playerInfo
-		for i, p := range players {
-			if p.BusName == preferred || p.Identity == preferred {
-				preferredPlayer = &players[i]
-				if strings.EqualFold(p.PlaybackStatus, "Playing") {
-					return recordIfPlaying(p), nil
-				}
-				break
-			}
-		}
-		// If preferred is paused/stopped and another is playing, prefer the playing one.
 		for _, p := range players {
-			if strings.EqualFold(p.PlaybackStatus, "Playing") {
+			if p.BusName == preferred || p.Identity == preferred {
 				return recordIfPlaying(p), nil
 			}
-		}
-		if preferredPlayer != nil {
-			return *preferredPlayer, nil
 		}
 		return playerInfo{}, fmt.Errorf("player %q not found", preferred)
 	}
