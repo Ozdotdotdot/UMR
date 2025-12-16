@@ -122,6 +122,7 @@ func main() {
 
 	go func() {
 		log.Printf("remoted %s listening on %s:%d (token set: %t)", cfg.Version, cfg.BindAddr, cfg.Port, cfg.Token != "")
+		log.Printf("web UI: http://%s:%d/ui", cfg.BindAddr, cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server error: %v", err)
 		}
