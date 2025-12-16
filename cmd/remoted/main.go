@@ -405,22 +405,57 @@ func pickPlayer(ctx context.Context, preferred string) (playerInfo, error) {
 		return playerInfo{}, fmt.Errorf("no players found")
 	}
 	if preferred != "" {
-		for _, p := range players {
+		var preferredPlayer *playerInfo
+		for i, p := range players {
 			if p.BusName == preferred || p.Identity == preferred {
+				preferredPlayer = &players[i]
+				if strings.EqualFold(p.PlaybackStatus, "Playing") {
+					return p, nil
+				}
+				break
+			}
+		}
+		// If preferred is paused/stopped and another is playing, prefer the playing one.
+		for _, p := range players {
+			if strings.EqualFold(p.PlaybackStatus, "Playing") {
 				return p, nil
 			}
 		}
+		if preferredPlayer != nil {
+			return *preferredPlayer, nil
+		}
 		return playerInfo{}, fmt.Errorf("player %q not found", preferred)
 	}
-	if last := getLastPlayer(); last != "" {
+	last := getLastPlayer()
+	playing := func(p playerInfo) bool {
+		return strings.EqualFold(p.PlaybackStatus, "Playing")
+	}
+
+	// 1) If last player is still present and playing, stick with it.
+	if last != "" {
+		for _, p := range players {
+			if (p.BusName == last || p.Identity == last) && playing(p) {
+				return p, nil
+			}
+		}
+	}
+	// 2) Otherwise, choose any playing player.
+	for _, p := range players {
+		if playing(p) {
+			return p, nil
+		}
+	}
+	// 3) If none playing, keep last if still present.
+	if last != "" {
 		for _, p := range players {
 			if p.BusName == last || p.Identity == last {
 				return p, nil
 			}
 		}
 	}
+	// 4) Fallback to first paused, else first.
 	for _, p := range players {
-		if p.IsActive {
+		if strings.EqualFold(p.PlaybackStatus, "Paused") {
 			return p, nil
 		}
 	}
@@ -464,7 +499,26 @@ func fetchPlayerInfo(ctx context.Context, conn *dbus.Conn, busName string) (play
 }
 
 func markActive(players []playerInfo) []playerInfo {
-	if last := getLastPlayer(); last != "" {
+	last := getLastPlayer()
+	playing := func(p playerInfo) bool {
+		return strings.EqualFold(p.PlaybackStatus, "Playing")
+	}
+	// align with pickPlayer ordering
+	if last != "" {
+		for i, p := range players {
+			if (p.BusName == last || p.Identity == last) && playing(p) {
+				players[i].IsActive = true
+				return players
+			}
+		}
+	}
+	for i, p := range players {
+		if playing(p) {
+			players[i].IsActive = true
+			return players
+		}
+	}
+	if last != "" {
 		for i, p := range players {
 			if p.BusName == last || p.Identity == last {
 				players[i].IsActive = true
@@ -472,21 +526,12 @@ func markActive(players []playerInfo) []playerInfo {
 			}
 		}
 	}
-
-	for i, p := range players {
-		if strings.EqualFold(p.PlaybackStatus, "Playing") {
-			players[i].IsActive = true
-			return players
-		}
-	}
-
 	for i, p := range players {
 		if strings.EqualFold(p.PlaybackStatus, "Paused") {
 			players[i].IsActive = true
 			return players
 		}
 	}
-
 	if len(players) > 0 {
 		players[0].IsActive = true
 	}

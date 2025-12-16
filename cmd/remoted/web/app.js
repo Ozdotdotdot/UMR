@@ -21,10 +21,16 @@ const volSlider = el("volume");
 
 let ws;
 let pollingTimer;
+let playersTimer;
+let wsReconnectTimer;
+let lastPlayerPref = "";
+let currentPlayer = "";
 
 function loadPrefs() {
   const host = localStorage.getItem("umr_host") || "http://127.0.0.1:8080";
   const token = localStorage.getItem("umr_token") || "";
+  lastPlayerPref = localStorage.getItem("umr_player") || "";
+  currentPlayer = lastPlayerPref;
   hostInput.value = host;
   tokenInput.value = token;
 }
@@ -32,6 +38,16 @@ function loadPrefs() {
 function savePrefs() {
   localStorage.setItem("umr_host", hostInput.value.trim());
   localStorage.setItem("umr_token", tokenInput.value.trim());
+  localStorage.setItem("umr_player", lastPlayerPref);
+}
+
+function setCurrentPlayer(val) {
+  currentPlayer = val || "";
+  lastPlayerPref = currentPlayer;
+  savePrefs();
+  if (playerSelect.value !== currentPlayer) {
+    playerSelect.value = currentPlayer;
+  }
 }
 
 function apiUrl(path, params = {}) {
@@ -75,6 +91,7 @@ function updateUI(info) {
 async function loadPlayers() {
   try {
     const players = await fetchJSON("/players");
+    let selected = currentPlayer || playerSelect.value || lastPlayerPref || "";
     playerSelect.innerHTML = "";
     const autoOpt = document.createElement("option");
     autoOpt.value = "";
@@ -84,8 +101,34 @@ async function loadPlayers() {
       const opt = document.createElement("option");
       opt.value = p.bus_name;
       opt.textContent = `${p.identity || p.bus_name} (${p.playback_status})`;
-      if (p.is_active) opt.selected = true;
       playerSelect.appendChild(opt);
+    }
+
+    const isPlaying = (p) => (p.playback_status || "").toLowerCase() === "playing";
+
+    if (selected) {
+      const exists = players.find((p) => p.bus_name === selected);
+      if (!exists) {
+        selected = "";
+      }
+    }
+
+    if (!selected) {
+      const playing = players.find(isPlaying);
+      if (playing) {
+        selected = playing.bus_name;
+      } else {
+        const active = players.find((p) => p.is_active);
+        if (active) selected = active.bus_name;
+      }
+    }
+
+    if (selected) {
+      playerSelect.value = selected;
+      setCurrentPlayer(selected);
+    } else if (playerSelect.options.length > 0) {
+      playerSelect.selectedIndex = 0; // Auto
+      setCurrentPlayer("");
     }
   } catch (err) {
     statusLine.textContent = `Load players failed: ${err.message}`;
@@ -95,7 +138,7 @@ async function loadPlayers() {
 async function refreshNowPlaying() {
   try {
     const params = {};
-    if (playerSelect.value) params.player = playerSelect.value;
+    if (currentPlayer) params.player = currentPlayer;
     const info = await fetchJSON("/nowplaying", params);
     updateUI(info);
   } catch (err) {
@@ -105,10 +148,13 @@ async function refreshNowPlaying() {
 
 function startPolling() {
   clearInterval(pollingTimer);
+  clearInterval(playersTimer);
   pollingTimer = setInterval(refreshNowPlaying, 3000);
+  playersTimer = setInterval(loadPlayers, 5000);
 }
 
 function stopWS() {
+  clearTimeout(wsReconnectTimer);
   if (ws) {
     ws.close();
     ws = null;
@@ -118,7 +164,7 @@ function stopWS() {
 function startWS() {
   stopWS();
   const params = new URLSearchParams();
-  if (playerSelect.value) params.set("player", playerSelect.value);
+  if (currentPlayer) params.set("player", currentPlayer);
   const token = tokenInput.value.trim();
   if (token) params.set("token", token);
   params.set("interval_ms", "2000");
@@ -139,12 +185,24 @@ function startWS() {
       }
     };
     ws.onopen = () => (statusLine.textContent = "Connected (WS)");
-    ws.onclose = () => (statusLine.textContent = "Disconnected");
-    ws.onerror = () => (statusLine.textContent = "WS error");
+    ws.onclose = () => {
+      statusLine.textContent = "Disconnected";
+      wsReconnectTimer = setTimeout(startWS, 1500);
+    };
+    ws.onerror = () => {
+      statusLine.textContent = "WS error";
+      wsReconnectTimer = setTimeout(startWS, 1500);
+    };
   } catch (err) {
     statusLine.textContent = `WS failed: ${err.message}`;
   }
 }
+
+playerSelect.addEventListener("change", () => {
+  setCurrentPlayer(playerSelect.value);
+  startWS();
+  refreshNowPlaying();
+});
 
 function playerParam() {
   return playerSelect.value ? { player: playerSelect.value } : {};
