@@ -6,6 +6,13 @@ All endpoints are HTTP+JSON unless noted. Defaults bind to `127.0.0.1:8080`; set
 - `REMOTED_TOKEN` (optional; when set, all routes except `/healthz` require it)
 - `REMOTED_ART_CACHE` (optional art cache dir; default `~/.cache/umr/art` or `/tmp/umr/art`)
 
+Quick start (server):
+```bash
+REMOTED_TOKEN="choose-a-secret" remoted
+# or: go run ./cmd/remoted
+```
+UI: `http://<host>:<port>/ui` (enter token if set). API: `http://<host>:<port>/...`
+
 ## Auth
 When `REMOTED_TOKEN` is set, include it on every request (except `/healthz`):
 - `Authorization: Bearer <token>` (preferred), or

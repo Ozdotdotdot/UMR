@@ -1,58 +1,59 @@
 # remoted
 
-Prototype Go daemon for remote media control on Linux. Early stage: only a health endpoint is wired up while we build out media and volume controls.
+Go daemon + web UI for remote media control on Linux (MPRIS playback + PipeWire/PulseAudio volume). Includes a live now-playing page with artwork, transport controls, seek bar, and volume.
+
+## Features
+- Auto player selection with manual override; WebSocket push updates (no polling).
+- Play/pause, next/prev, ±10s seek, arbitrary seek via scrubber, volume set/delta/mute.
+- Artwork proxying for local `file://` art (under `/tmp`/`/var/tmp`).
+- HTTP API + browser UI (`/ui`).
 
 ## Prereqs
-
-- Go 1.21+ (`go` and `gofmt` need to be installed on your system)
+- Linux desktop with MPRIS-capable players and DBus (standard on most distros).
+- PipeWire (`wpctl`) or PulseAudio (`pactl`) for volume control.
+- Go 1.21+ (only needed for `go install` or building yourself).
 
 ## Install (Go users)
-
 ```bash
 go install github.com/myusername/UMR/cmd/remoted@latest
 ```
-
 Notes:
-- The binary name is `remoted`; ensure `$GOBIN` (or `$GOPATH/bin`) is on your `PATH`.
-- `@latest` resolves to the latest git tag (e.g. `v0.1.0`). Tag and push releases so users get a stable version.
+- Binary name: `remoted`; ensure `$GOBIN` (or `$GOPATH/bin`) is on your `PATH`.
+- `@latest` resolves to the latest git tag (e.g., `v0.1.0`). Tag and push releases so users get a stable version.
 
-## Run (dev)
+## Install (downloaded binary)
+Release tarballs include ready-to-run binaries:
+- `remoted-linux-amd64.tar.gz`
+- `remoted-linux-arm64.tar.gz`
 
+Download and unpack:
 ```bash
-# from repo root
-export REMOTED_TOKEN="choose-a-secret"   # optional; required for future control endpoints
-export REMOTED_BIND="127.0.0.1"          # default
-export REMOTED_PORT="8080"               # default
-
-go run ./cmd/remoted
+tar -xf remoted-linux-amd64.tar.gz
+./remoted
 ```
 
-Health check:
+## Configure / Run
+Env vars (all optional):
+- `REMOTED_BIND` — listen address (default `127.0.0.1`)
+-, `REMOTED_PORT` — listen port (default `8080`)
+- `REMOTED_TOKEN` — when set, required for everything except `/healthz`
+- `REMOTED_ART_CACHE` — art cache dir (default `~/.cache/umr/art` or `/tmp/umr/art`)
 
+Examples:
+```bash
+# local-only
+REMOTED_TOKEN="choose-a-secret" remoted
+
+# LAN access
+REMOTED_BIND=0.0.0.0 REMOTED_TOKEN="choose-a-secret" remoted
+```
+
+Visit the UI at `http://<host>:<port>/ui` (enter your token if set). WebSocket updates keep the page live; transport and volume controls call the API.
+
+Health check:
 ```bash
 curl http://127.0.0.1:8080/healthz
 ```
 
-Response example:
-
-```json
-{
-  "status": "ok",
-  "version": "0.0.1",
-  "host": "my-host",
-  "uptime": "123ms",
-  "started": "2023-12-13T03:34:00Z",
-  "now": "2023-12-13T03:35:00Z",
-  "requires_token": false
-}
-```
-
 ## API
-
-See `docs/API.md` for endpoints, auth, and examples.
-
-## Next steps (planned)
-
-- Token-authenticated control endpoints (MPRIS playback, PulseAudio/PipeWire volume)
-- Simple web harness for cURL/JS testing
-- TUI client using Bubble Tea
+See `docs/API.md` for endpoints, auth, and examples (players, nowplaying, playback controls, seek, volume, art proxy).
