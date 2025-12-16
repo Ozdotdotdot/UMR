@@ -24,7 +24,7 @@ let pollingTimer;
 let playersTimer;
 let wsReconnectTimer;
 let lastPlayerPref = "";
-let currentPlayer = "";
+let currentPlayer = ""; // empty string means Auto mode (server decides)
 
 function loadPrefs() {
   const host = localStorage.getItem("umr_host") || "http://127.0.0.1:8080";
@@ -45,9 +45,7 @@ function setCurrentPlayer(val) {
   currentPlayer = val || "";
   lastPlayerPref = currentPlayer;
   savePrefs();
-  if (playerSelect.value !== currentPlayer) {
-    playerSelect.value = currentPlayer;
-  }
+  playerSelect.value = currentPlayer;
 }
 
 function apiUrl(path, params = {}) {
@@ -86,9 +84,6 @@ function updateUI(info) {
   const art = info.art_url_proxy || info.art_url || "";
   artImg.src = art || "";
   statusLine.textContent = `Player: ${info.identity || info.bus_name || "auto"} | ${new Date().toLocaleTimeString()}`;
-  if (info.bus_name && info.bus_name !== currentPlayer) {
-    setCurrentPlayer(info.bus_name);
-  }
 }
 
 async function loadPlayers() {
@@ -107,8 +102,6 @@ async function loadPlayers() {
       playerSelect.appendChild(opt);
     }
 
-    const isPlaying = (p) => (p.playback_status || "").toLowerCase() === "playing";
-
     if (selected) {
       const exists = players.find((p) => p.bus_name === selected);
       if (!exists) {
@@ -116,20 +109,10 @@ async function loadPlayers() {
       }
     }
 
-    if (!selected) {
-      const playing = players.find(isPlaying);
-      if (playing) {
-        selected = playing.bus_name;
-      } else {
-        const active = players.find((p) => p.is_active);
-        if (active) selected = active.bus_name;
-      }
-    }
-
     if (selected) {
       playerSelect.value = selected;
       setCurrentPlayer(selected);
-    } else if (playerSelect.options.length > 0) {
+    } else {
       playerSelect.selectedIndex = 0; // Auto
       setCurrentPlayer("");
     }
