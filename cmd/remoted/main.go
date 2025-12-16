@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"crypto/sha1"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -22,6 +24,7 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
+	"nhooyr.io/websocket"
 )
 
 const (
@@ -42,6 +45,9 @@ var (
 var (
 	artCacheDir string
 )
+
+//go:embed web/*
+var webFS embed.FS
 
 type Config struct {
 	BindAddr string
@@ -69,6 +75,12 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	staticFS, err := fs.Sub(webFS, "web")
+	if err != nil {
+		log.Fatalf("failed to init static fs: %v", err)
+	}
+	fileServer := http.FileServer(http.FS(staticFS))
+
 	mux.HandleFunc("/healthz", healthHandler(cfg))
 	mux.Handle("/players", requireToken(cfg.Token, http.HandlerFunc(playersHandler)))
 	mux.Handle("/player/status", requireToken(cfg.Token, http.HandlerFunc(playerStatusHandler)))
@@ -78,6 +90,10 @@ func main() {
 	mux.Handle("/player/prev", requireToken(cfg.Token, http.HandlerFunc(previousHandler)))
 	mux.Handle("/volume", requireToken(cfg.Token, http.HandlerFunc(volumeHandler)))
 	mux.Handle("/art/", requireToken(cfg.Token, http.HandlerFunc(artHandler)))
+	mux.Handle("/ws", requireToken(cfg.Token, http.HandlerFunc(wsHandler)))
+	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+	mux.Handle("/ui", http.HandlerFunc(uiHandler))
+	mux.Handle("/", http.HandlerFunc(uiHandler))
 
 	srv := &http.Server{
 		Addr:    net.JoinHostPort(cfg.BindAddr, strconv.Itoa(cfg.Port)),
@@ -211,6 +227,60 @@ func playerStatusHandler(w http.ResponseWriter, r *http.Request) {
 // nowPlayingHandler is a convenience alias for playerStatus without needing a query param.
 func nowPlayingHandler(w http.ResponseWriter, r *http.Request) {
 	playerStatusHandler(w, r)
+}
+
+// wsHandler streams now-playing updates over WebSocket. Optionally accepts ?player=
+// and ?interval_ms= for update cadence (default 2000ms).
+func wsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		CompressionMode: websocket.CompressionDisabled,
+	})
+	if err != nil {
+		log.Printf("ws accept failed: %v", err)
+		return
+	}
+	defer c.Close(websocket.StatusNormalClosure, "bye")
+
+	interval := 2 * time.Second
+	if ms := r.URL.Query().Get("interval_ms"); ms != "" {
+		if val, err := strconv.Atoi(ms); err == nil && val >= 200 {
+			interval = time.Duration(val) * time.Millisecond
+		}
+	}
+	player := r.URL.Query().Get("player")
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	sendUpdate := func() error {
+		pctx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		info, err := pickPlayer(pctx, player)
+		if err != nil {
+			return c.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"error":"%s"}`, err.Error())))
+		}
+		payload, _ := json.Marshal(info)
+		return c.Write(ctx, websocket.MessageText, payload)
+	}
+
+	// initial push
+	if err := sendUpdate(); err != nil {
+		log.Printf("ws send failed: %v", err)
+		return
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := sendUpdate(); err != nil {
+				log.Printf("ws send failed: %v", err)
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func playPauseHandler(w http.ResponseWriter, r *http.Request) {
@@ -842,6 +912,16 @@ func artHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, path)
 }
 
+func uiHandler(w http.ResponseWriter, r *http.Request) {
+	data, err := webFS.ReadFile("web/index.html")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(data)
+}
+
 func requireToken(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token == "" {
@@ -868,6 +948,9 @@ func extractToken(r *http.Request) string {
 		}
 	}
 	if token := r.Header.Get("X-Remote-Token"); token != "" {
+		return token
+	}
+	if token := r.URL.Query().Get("token"); token != "" {
 		return token
 	}
 	return ""

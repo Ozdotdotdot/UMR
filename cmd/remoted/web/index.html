@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UMR Remote</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="page">
+    <header class="top">
+      <div class="brand">UMR Remote</div>
+      <div class="inline">
+        <input id="host" type="text" placeholder="http://127.0.0.1:8080" />
+        <input id="token" type="password" placeholder="Token (optional)" />
+        <button id="connect">Connect</button>
+      </div>
+      <div class="inline">
+        <label for="player">Player:</label>
+        <select id="player"></select>
+        <button id="refresh">Refresh</button>
+      </div>
+    </header>
+
+    <section class="now-playing card">
+      <div class="art-wrap">
+        <img id="art" alt="artwork" />
+      </div>
+      <div class="meta">
+        <div id="title" class="title">Title</div>
+        <div id="artist" class="artist">Artist</div>
+        <div id="album" class="album">Album</div>
+        <div id="status" class="status">Status</div>
+      </div>
+    </section>
+
+    <section class="controls">
+      <div class="row">
+        <button id="prev">Prev</button>
+        <button id="playpause">Play/Pause</button>
+        <button id="next">Next</button>
+      </div>
+      <div class="row">
+        <button id="vol-down">Vol -</button>
+        <input id="volume" type="range" min="0" max="100" step="1" />
+        <button id="vol-up">Vol +</button>
+        <button id="mute">Mute</button>
+      </div>
+    </section>
+  </main>
+
+  <div class="sticky">
+    <div id="status-line">Disconnected</div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
