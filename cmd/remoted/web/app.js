@@ -13,8 +13,10 @@ const statusEl = el("status");
 const statusLine = el("status-line");
 const playPauseBtn = el("playpause");
 const playPauseIcon = el("playpause-icon");
+const replay10Btn = el("replay10");
 const prevBtn = el("prev");
 const nextBtn = el("next");
+const forward10Btn = el("forward10");
 const volDownBtn = el("vol-down");
 const volUpBtn = el("vol-up");
 const muteBtn = el("mute");
@@ -188,6 +190,13 @@ async function bindControls() {
       statusLine.textContent = `Play/pause failed: ${err.message}`;
     }
   };
+  replay10Btn.onclick = async () => {
+    try {
+      await postJSON("/player/seek", { delta_ms: -10000 }, playerParam());
+    } catch (err) {
+      statusLine.textContent = `Replay 10 failed: ${err.message}`;
+    }
+  };
   prevBtn.onclick = async () => {
     try {
       await postJSON("/player/prev", {}, playerParam());
@@ -200,6 +209,13 @@ async function bindControls() {
       await postJSON("/player/next", {}, playerParam());
     } catch (err) {
       statusLine.textContent = `Next failed: ${err.message}`;
+    }
+  };
+  forward10Btn.onclick = async () => {
+    try {
+      await postJSON("/player/seek", { delta_ms: 10000 }, playerParam());
+    } catch (err) {
+      statusLine.textContent = `Forward 10 failed: ${err.message}`;
     }
   };
   volDownBtn.onclick = () => adjustVolume(-0.05);

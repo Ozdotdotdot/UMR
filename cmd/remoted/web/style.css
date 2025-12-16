@@ -109,6 +109,21 @@ button:hover { background: #2d3a56; }
   width: 18px;
   height: 18px;
 }
+.icon-ghost {
+  background: transparent;
+  border: none;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+}
+.icon-img {
+  width: 24px;
+  height: 24px;
+}
 .icon-play {
   border-style: solid;
   border-width: 9px 0 9px 14px;
@@ -127,6 +142,84 @@ button:hover { background: #2d3a56; }
   height: 18px;
   background: var(--text);
   border-radius: 2px;
+}
+.icon-skip-next,
+.icon-skip-prev {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 18px;
+  position: relative;
+}
+.icon-skip-next::before,
+.icon-skip-prev::before,
+.icon-skip-next::after,
+.icon-skip-prev::after {
+  content: "";
+  display: block;
+  position: absolute;
+}
+.icon-skip-next::before,
+.icon-skip-prev::before {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 9px 12px 9px 0;
+  border-color: transparent var(--text) transparent transparent;
+}
+.icon-skip-next::after {
+  right: 0;
+  width: 3px;
+  height: 18px;
+  background: var(--text);
+  border-radius: 1px;
+}
+.icon-skip-prev::before {
+  transform: scaleX(-1);
+}
+.icon-skip-prev::after {
+  left: 0;
+  width: 3px;
+  height: 18px;
+  background: var(--text);
+  border-radius: 1px;
+}
+.icon-forward-10,
+.icon-replay-10 {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 26px;
+  height: 18px;
+  position: relative;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: -0.2px;
+}
+.icon-forward-10::before,
+.icon-replay-10::before {
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 7px 0 7px 10px;
+  border-color: transparent transparent transparent var(--text);
+}
+.icon-forward-10::after,
+.icon-replay-10::after {
+  content: "10";
+  display: block;
+  line-height: 1;
+}
+.icon-replay-10 {
+  flex-direction: row-reverse;
+}
+.icon-replay-10::before {
+  transform: scaleX(-1);
 }
 
 .sticky {

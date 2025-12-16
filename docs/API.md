@@ -33,6 +33,7 @@ You can pin a player by bus name or identity via `?player=org.mpris.MediaPlayer2
 - `POST /player/playpause` — toggles play/pause (uses Play/Pause explicitly, fallback to PlayPause).
 - `POST /player/next` — next track.
 - `POST /player/prev` — previous track.
+- `POST /player/seek` — JSON body `{"delta_ms":10000}` moves playback forward/back by delta (ms) using MPRIS Seek; negative to rewind.
 Optional: `?player=...` to target a specific player.
 
 ### System volume (PipeWire/PulseAudio)

@@ -93,6 +93,7 @@ func main() {
 	mux.Handle("/player/playpause", requireToken(cfg.Token, http.HandlerFunc(playPauseHandler)))
 	mux.Handle("/player/next", requireToken(cfg.Token, http.HandlerFunc(nextHandler)))
 	mux.Handle("/player/prev", requireToken(cfg.Token, http.HandlerFunc(previousHandler)))
+	mux.Handle("/player/seek", requireToken(cfg.Token, http.HandlerFunc(seekHandler)))
 	mux.Handle("/volume", requireToken(cfg.Token, http.HandlerFunc(volumeHandler)))
 	mux.Handle("/art/", requireToken(cfg.Token, http.HandlerFunc(artHandler)))
 	mux.Handle("/ws", requireToken(cfg.Token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -487,6 +488,54 @@ func controlHandler(w http.ResponseWriter, r *http.Request, method string) {
 	})
 }
 
+type seekRequest struct {
+	DeltaMillis int64 `json:"delta_ms"`
+}
+
+func seekHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req seekRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.DeltaMillis == 0 {
+		http.Error(w, "delta_ms required", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	target := r.URL.Query().Get("player")
+	info, err := pickPlayer(ctx, target)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("select player: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if err := seekPlayer(ctx, info.BusName, req.DeltaMillis); err != nil {
+		http.Error(w, fmt.Sprintf("seek: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	setLastPlayer(info.BusName)
+	if globalHub != nil {
+		globalHub.requestBroadcast()
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"player": info.Identity,
+		"action": "seek",
+		"delta":  req.DeltaMillis,
+		"status": "ok",
+	})
+}
+
 func callPlayerMethod(ctx context.Context, busName, method string) error {
 	conn, err := dbus.SessionBus()
 	if err != nil {
@@ -496,6 +545,22 @@ func callPlayerMethod(ctx context.Context, busName, method string) error {
 
 	obj := conn.Object(busName, "/org/mpris/MediaPlayer2")
 	call := obj.CallWithContext(ctx, method, 0)
+	if call.Err != nil {
+		return call.Err
+	}
+	return nil
+}
+
+func seekPlayer(ctx context.Context, busName string, deltaMillis int64) error {
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		return fmt.Errorf("session bus: %w", err)
+	}
+	defer conn.Close()
+
+	obj := conn.Object(busName, "/org/mpris/MediaPlayer2")
+	offsetMicros := deltaMillis * 1000
+	call := obj.CallWithContext(ctx, "org.mpris.MediaPlayer2.Player.Seek", 0, offsetMicros)
 	if call.Err != nil {
 		return call.Err
 	}
