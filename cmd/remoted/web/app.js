@@ -145,6 +145,16 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
+function applyLocalSeek(deltaMs) {
+  if (durationMs <= 0) {
+    return;
+  }
+  lastPositionMs = Math.max(0, Math.min(durationMs, lastPositionMs + deltaMs));
+  lastUpdateTs = performance.now();
+  positionSlider.value = lastPositionMs;
+  renderTime(lastPositionMs, durationMs);
+}
+
 async function syncVolume() {
   try {
     const res = await fetch(apiUrl("/volume"), { headers: authHeaders() });
@@ -258,6 +268,7 @@ async function bindControls() {
   replay10Btn.onclick = async () => {
     try {
       await postJSON("/player/seek", { delta_ms: -10000 }, playerParam());
+      applyLocalSeek(-10000);
     } catch (err) {
       statusLine.textContent = `Replay 10 failed: ${err.message}`;
     }
@@ -279,6 +290,7 @@ async function bindControls() {
   forward10Btn.onclick = async () => {
     try {
       await postJSON("/player/seek", { delta_ms: 10000 }, playerParam());
+      applyLocalSeek(10000);
     } catch (err) {
       statusLine.textContent = `Forward 10 failed: ${err.message}`;
     }
