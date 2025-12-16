@@ -6,6 +6,16 @@ Prototype Go daemon for remote media control on Linux. Early stage: only a healt
 
 - Go 1.21+ (`go` and `gofmt` need to be installed on your system)
 
+## Install (Go users)
+
+```bash
+go install github.com/myusername/UMR/cmd/remoted@latest
+```
+
+Notes:
+- The binary name is `remoted`; ensure `$GOBIN` (or `$GOPATH/bin`) is on your `PATH`.
+- `@latest` resolves to the latest git tag (e.g. `v0.1.0`). Tag and push releases so users get a stable version.
+
 ## Run (dev)
 
 ```bash

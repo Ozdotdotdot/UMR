@@ -1,4 +1,4 @@
-module remote
+module github.com/ozdotdotdot/UMR
 
 go 1.21
 
