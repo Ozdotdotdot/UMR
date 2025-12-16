@@ -21,8 +21,6 @@ const muteBtn = el("mute");
 const volSlider = el("volume");
 
 let ws;
-let pollingTimer;
-let playersTimer;
 let wsReconnectTimer;
 let lastPlayerPref = "";
 let currentPlayer = ""; // empty string means Auto mode (server decides)
@@ -129,24 +127,6 @@ async function loadPlayers() {
   }
 }
 
-async function refreshNowPlaying() {
-  try {
-    const params = {};
-    if (currentPlayer) params.player = currentPlayer;
-    const info = await fetchJSON("/nowplaying", params);
-    updateUI(info);
-  } catch (err) {
-    statusLine.textContent = `Now playing failed: ${err.message}`;
-  }
-}
-
-function startPolling() {
-  clearInterval(pollingTimer);
-  clearInterval(playersTimer);
-  pollingTimer = setInterval(refreshNowPlaying, 3000);
-  playersTimer = setInterval(loadPlayers, 5000);
-}
-
 function stopWS() {
   clearTimeout(wsReconnectTimer);
   if (ws) {
@@ -161,7 +141,6 @@ function startWS() {
   if (currentPlayer) params.set("player", currentPlayer);
   const token = tokenInput.value.trim();
   if (token) params.set("token", token);
-  params.set("interval_ms", "2000");
   const wsUrl = apiUrl("/ws", Object.fromEntries(params));
   const wsUri = wsUrl.replace(/^http/, "ws");
   try {
@@ -195,7 +174,6 @@ function startWS() {
 playerSelect.addEventListener("change", () => {
   setCurrentPlayer(playerSelect.value);
   startWS();
-  refreshNowPlaying();
 });
 
 function playerParam() {
@@ -206,7 +184,6 @@ async function bindControls() {
   playPauseBtn.onclick = async () => {
     try {
       await postJSON("/player/playpause", {}, playerParam());
-      await refreshNowPlaying();
     } catch (err) {
       statusLine.textContent = `Play/pause failed: ${err.message}`;
     }
@@ -214,7 +191,6 @@ async function bindControls() {
   prevBtn.onclick = async () => {
     try {
       await postJSON("/player/prev", {}, playerParam());
-      await refreshNowPlaying();
     } catch (err) {
       statusLine.textContent = `Prev failed: ${err.message}`;
     }
@@ -222,7 +198,6 @@ async function bindControls() {
   nextBtn.onclick = async () => {
     try {
       await postJSON("/player/next", {}, playerParam());
-      await refreshNowPlaying();
     } catch (err) {
       statusLine.textContent = `Next failed: ${err.message}`;
     }
@@ -232,7 +207,6 @@ async function bindControls() {
   muteBtn.onclick = async () => {
     try {
       await postJSON("/volume", { mute: true });
-      await refreshNowPlaying();
     } catch (err) {
       statusLine.textContent = `Mute failed: ${err.message}`;
     }
@@ -262,17 +236,12 @@ async function init() {
     savePrefs();
     stopWS();
     await loadPlayers();
-    await refreshNowPlaying();
-    startPolling();
     startWS();
   };
   refreshBtn.onclick = async () => {
     await loadPlayers();
-    await refreshNowPlaying();
   };
   await loadPlayers();
-  await refreshNowPlaying();
-  startPolling();
   startWS();
 }
 

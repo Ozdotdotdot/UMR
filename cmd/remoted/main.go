@@ -46,6 +46,8 @@ var (
 	artCacheDir string
 )
 
+var globalHub *wsHub
+
 //go:embed web/*
 var webFS embed.FS
 
@@ -74,6 +76,9 @@ func main() {
 		log.Fatalf("failed to create art cache dir: %v", err)
 	}
 
+	hub := newWSHub()
+	globalHub = hub
+
 	mux := http.NewServeMux()
 	staticFS, err := fs.Sub(webFS, "web")
 	if err != nil {
@@ -90,7 +95,9 @@ func main() {
 	mux.Handle("/player/prev", requireToken(cfg.Token, http.HandlerFunc(previousHandler)))
 	mux.Handle("/volume", requireToken(cfg.Token, http.HandlerFunc(volumeHandler)))
 	mux.Handle("/art/", requireToken(cfg.Token, http.HandlerFunc(artHandler)))
-	mux.Handle("/ws", requireToken(cfg.Token, http.HandlerFunc(wsHandler)))
+	mux.Handle("/ws", requireToken(cfg.Token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wsHandler(hub, w, r)
+	})))
 	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
 	mux.Handle("/ui", http.HandlerFunc(uiHandler))
 	mux.Handle("/", http.HandlerFunc(uiHandler))
@@ -102,6 +109,9 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	go hub.run(ctx)
+	go startSignalListener(ctx, hub)
 
 	go func() {
 		log.Printf("remoted %s listening on %s:%d (token set: %t)", cfg.Version, cfg.BindAddr, cfg.Port, cfg.Token != "")
@@ -199,6 +209,148 @@ type playerInfo struct {
 	ArtURLProxy    string `json:"art_url_proxy,omitempty"`
 }
 
+type wsClient struct {
+	conn   *websocket.Conn
+	player string
+	mu     sync.Mutex // serialize writes per client
+}
+
+type wsHub struct {
+	mu      sync.RWMutex
+	clients map[*wsClient]struct{}
+	notify  chan struct{}
+}
+
+func newWSHub() *wsHub {
+	return &wsHub{
+		clients: make(map[*wsClient]struct{}),
+		notify:  make(chan struct{}, 1),
+	}
+}
+
+func (h *wsHub) addClient(c *websocket.Conn, player string) *wsClient {
+	client := &wsClient{conn: c, player: player}
+	h.mu.Lock()
+	h.clients[client] = struct{}{}
+	h.mu.Unlock()
+	h.requestBroadcast()
+	return client
+}
+
+func (h *wsHub) removeClient(client *wsClient) {
+	h.mu.Lock()
+	delete(h.clients, client)
+	h.mu.Unlock()
+	client.conn.Close(websocket.StatusNormalClosure, "bye")
+}
+
+func (h *wsHub) requestBroadcast() {
+	select {
+	case h.notify <- struct{}{}:
+	default:
+	}
+}
+
+func (h *wsHub) run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.notify:
+			// Coalesce multiple notifications.
+		Drain:
+			for {
+				select {
+				case <-h.notify:
+					continue
+				default:
+					break Drain
+				}
+			}
+			h.broadcast(context.Background())
+		}
+	}
+}
+
+func (h *wsHub) broadcast(ctx context.Context) {
+	h.mu.RLock()
+	clients := make([]*wsClient, 0, len(h.clients))
+	for c := range h.clients {
+		clients = append(clients, c)
+	}
+	h.mu.RUnlock()
+
+	for _, c := range clients {
+		if err := h.sendNowPlaying(ctx, c); err != nil {
+			log.Printf("ws broadcast failed: %v", err)
+		}
+	}
+}
+
+func (h *wsHub) sendNowPlaying(ctx context.Context, client *wsClient) error {
+	pctx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	info, err := pickPlayer(pctx, client.player)
+	if err != nil {
+		return h.write(client, map[string]string{"error": err.Error()})
+	}
+	return h.write(client, info)
+}
+
+func (h *wsHub) write(client *wsClient, payload interface{}) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.conn.Write(ctx, websocket.MessageText, data); err != nil {
+		return err
+	}
+	return nil
+}
+
+// startSignalListener listens for MPRIS changes and triggers broadcasts to connected WebSocket clients.
+func startSignalListener(ctx context.Context, hub *wsHub) {
+	conn, err := dbus.ConnectSessionBus()
+	if err != nil {
+		log.Printf("ws signal listener: session bus connect failed: %v", err)
+		return
+	}
+
+	propsMatch := "type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',path_namespace='/org/mpris/MediaPlayer2'"
+	nameMatch := "type='signal',interface='org.freedesktop.DBus',member='NameOwnerChanged'"
+	_ = conn.BusObject().CallWithContext(ctx, "org.freedesktop.DBus.AddMatch", 0, propsMatch)
+	_ = conn.BusObject().CallWithContext(ctx, "org.freedesktop.DBus.AddMatch", 0, nameMatch)
+
+	sigCh := make(chan *dbus.Signal, 32)
+	conn.Signal(sigCh)
+
+	for {
+		select {
+		case <-ctx.Done():
+			conn.RemoveSignal(sigCh)
+			conn.Close()
+			return
+		case sig, ok := <-sigCh:
+			if !ok || sig == nil {
+				return
+			}
+			if strings.HasPrefix(string(sig.Path), "/org/mpris/MediaPlayer2") {
+				hub.requestBroadcast()
+				continue
+			}
+			if len(sig.Body) >= 1 {
+				if name, ok := sig.Body[0].(string); ok && strings.HasPrefix(name, "org.mpris.MediaPlayer2.") {
+					hub.requestBroadcast()
+				}
+			}
+		}
+	}
+}
+
 func playersHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
@@ -229,9 +381,9 @@ func nowPlayingHandler(w http.ResponseWriter, r *http.Request) {
 	playerStatusHandler(w, r)
 }
 
-// wsHandler streams now-playing updates over WebSocket. Optionally accepts ?player=
-// and ?interval_ms= for update cadence (default 2000ms).
-func wsHandler(w http.ResponseWriter, r *http.Request) {
+// wsHandler streams now-playing updates over WebSocket. Optionally accepts ?player= for a fixed player,
+// or empty to auto-select. Updates are pushed from the server when changes are detected.
+func wsHandler(hub *wsHub, w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionDisabled,
@@ -240,44 +392,20 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ws accept failed: %v", err)
 		return
 	}
-	defer c.Close(websocket.StatusNormalClosure, "bye")
 
-	interval := 2 * time.Second
-	if ms := r.URL.Query().Get("interval_ms"); ms != "" {
-		if val, err := strconv.Atoi(ms); err == nil && val >= 200 {
-			interval = time.Duration(val) * time.Millisecond
-		}
-	}
 	player := r.URL.Query().Get("player")
+	client := hub.addClient(c, player)
+	defer hub.removeClient(client)
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	sendUpdate := func() error {
-		pctx, cancel := context.WithTimeout(ctx, time.Second)
-		defer cancel()
-		info, err := pickPlayer(pctx, player)
-		if err != nil {
-			return c.Write(ctx, websocket.MessageText, []byte(fmt.Sprintf(`{"error":"%s"}`, err.Error())))
-		}
-		payload, _ := json.Marshal(info)
-		return c.Write(ctx, websocket.MessageText, payload)
-	}
-
-	// initial push
-	if err := sendUpdate(); err != nil {
-		log.Printf("ws send failed: %v", err)
+	if err := hub.sendNowPlaying(ctx, client); err != nil {
+		log.Printf("ws initial send failed: %v", err)
 		return
 	}
 
 	for {
-		select {
-		case <-ticker.C:
-			if err := sendUpdate(); err != nil {
-				log.Printf("ws send failed: %v", err)
-				return
-			}
-		case <-ctx.Done():
+		// Drain incoming messages to detect disconnects; we don't expect payloads.
+		_, _, err := c.Read(ctx)
+		if err != nil {
 			return
 		}
 	}
@@ -312,6 +440,9 @@ func playPauseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	setLastPlayer(info.BusName)
+	if globalHub != nil {
+		globalHub.requestBroadcast()
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"player": info.Identity,
@@ -345,6 +476,9 @@ func controlHandler(w http.ResponseWriter, r *http.Request, method string) {
 	}
 
 	setLastPlayer(info.BusName)
+	if globalHub != nil {
+		globalHub.requestBroadcast()
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"player": info.Identity,
