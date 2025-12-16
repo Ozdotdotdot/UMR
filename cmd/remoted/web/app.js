@@ -20,12 +20,14 @@ const forward10Btn = el("forward10");
 const volDownBtn = el("vol-down");
 const volUpBtn = el("vol-up");
 const muteBtn = el("mute");
+const muteIcon = el("mute-icon");
 const volSlider = el("volume");
 
 let ws;
 let wsReconnectTimer;
 let lastPlayerPref = "";
 let currentPlayer = ""; // empty string means Auto mode (server decides)
+let isMuted = false;
 
 function loadPrefs() {
   const host = localStorage.getItem("umr_host") || "http://127.0.0.1:8080";
@@ -92,6 +94,29 @@ function setPlayPauseIcon(status) {
   const isPlaying = (status || "").toLowerCase() === "playing";
   playPauseIcon.classList.toggle("icon-play", !isPlaying);
   playPauseIcon.classList.toggle("icon-pause", isPlaying);
+}
+
+function setMuteIcon(stateMuted) {
+  isMuted = !!stateMuted;
+  muteIcon.src = isMuted
+    ? "/static/volume_mute_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg"
+    : "/static/volume_up_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg";
+  muteIcon.alt = isMuted ? "Volume muted" : "Volume up";
+  muteBtn.setAttribute("aria-pressed", isMuted ? "true" : "false");
+}
+
+async function syncVolume() {
+  try {
+    const res = await fetch(apiUrl("/volume"), { headers: authHeaders() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    setMuteIcon(data.muted);
+    if (typeof data.volume === "number") {
+      volSlider.value = Math.round(data.volume * 100);
+    }
+  } catch (err) {
+    statusLine.textContent = `Volume fetch failed: ${err.message}`;
+  }
 }
 
 async function loadPlayers() {
@@ -221,8 +246,10 @@ async function bindControls() {
   volDownBtn.onclick = () => adjustVolume(-0.05);
   volUpBtn.onclick = () => adjustVolume(0.05);
   muteBtn.onclick = async () => {
+    const nextMuted = !isMuted;
     try {
-      await postJSON("/volume", { mute: true });
+      await postJSON("/volume", { mute: nextMuted });
+      setMuteIcon(nextMuted);
     } catch (err) {
       statusLine.textContent = `Mute failed: ${err.message}`;
     }
@@ -252,12 +279,15 @@ async function init() {
     savePrefs();
     stopWS();
     await loadPlayers();
+    await syncVolume();
     startWS();
   };
   refreshBtn.onclick = async () => {
     await loadPlayers();
+    await syncVolume();
   };
   await loadPlayers();
+  await syncVolume();
   startWS();
 }
 
