@@ -1,6 +1,5 @@
 const el = (id) => document.getElementById(id);
 
-const hostInput = el("host");
 const tokenInput = el("token");
 const connectBtn = el("connect");
 const refreshBtn = el("refresh");
@@ -38,16 +37,13 @@ let isPlaying = false;
 let userScrubbing = false;
 
 function loadPrefs() {
-  const host = localStorage.getItem("umr_host") || "http://127.0.0.1:8080";
   const token = localStorage.getItem("umr_token") || "";
   lastPlayerPref = localStorage.getItem("umr_player") || "";
   currentPlayer = lastPlayerPref;
-  hostInput.value = host;
   tokenInput.value = token;
 }
 
 function savePrefs() {
-  localStorage.setItem("umr_host", hostInput.value.trim());
   localStorage.setItem("umr_token", tokenInput.value.trim());
   localStorage.setItem("umr_player", lastPlayerPref);
 }
@@ -60,7 +56,7 @@ function setCurrentPlayer(val) {
 }
 
 function apiUrl(path, params = {}) {
-  const base = hostInput.value.replace(/\/+$/, "");
+  const base = window.location.origin.replace(/\/+$/, "");
   const query = new URLSearchParams(params);
   const qs = query.toString() ? `?${query.toString()}` : "";
   return `${base}${path}${qs}`;
