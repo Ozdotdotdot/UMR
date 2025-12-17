@@ -44,6 +44,8 @@ input, select, button {
   border: 1px solid #2a3040;
   background: #111620;
   color: var(--text);
+  font-size: 16px; /* avoid iOS zoom on focus */
+  touch-action: manipulation;
 }
 
 button {
@@ -115,6 +117,7 @@ button:hover { background: #2d3a56; }
   gap: 8px;
   align-items: center;
   justify-content: center;
+  touch-action: manipulation;
 }
 .icon-btn {
   width: 48px;
