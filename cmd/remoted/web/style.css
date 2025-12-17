@@ -88,6 +88,7 @@ button:hover { background: #2d3a56; }
   align-self: center;
 }
 .controls-row {
+  display: flex;
   justify-content: center;
   gap: 10px;
   align-items: center;
@@ -127,20 +128,47 @@ button:hover { background: #2d3a56; }
   justify-content: center;
   touch-action: manipulation;
 }
+.controls-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 12px 16px;
+  min-height: 52px;
+  font-size: 17px;
+  border-radius: 12px;
+}
+#prev,
+#next {
+  padding: 10px 10px;
+  min-height: 38px;
+  font-size: 16px;
+}
 .icon-btn {
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 12px;
 }
+.controls-row .icon-btn {
+  width: 56px;
+  height: 56px;
+}
+#playpause {
+  width: 64px;
+  height: 64px;
+}
 .icon {
   display: inline-block;
   width: 18px;
   height: 18px;
   vertical-align: middle;
+}
+#playpause .icon {
+  transform: scale(1.2);
 }
 .icon-ghost {
   background: transparent;
@@ -153,9 +181,17 @@ button:hover { background: #2d3a56; }
   justify-content: center;
   border-radius: 0;
 }
+.controls-row .icon-ghost {
+  width: 48px;
+  height: 48px;
+}
 .icon-img {
   width: 24px;
   height: 24px;
+}
+.controls-row .icon-img {
+  width: 28px;
+  height: 28px;
 }
 .icon-play {
   border-style: solid;
