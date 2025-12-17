@@ -68,6 +68,14 @@ button:hover { background: #2d3a56; }
   border-radius: 14px;
   background: var(--card);
 }
+.panel {
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .scrubber {
   grid-template-columns: 1fr;
