@@ -71,11 +71,12 @@ button:hover { background: #2d3a56; }
 
 .scrubber {
   grid-template-columns: 1fr;
-  justify-items: stretch;
-  text-align: left;
+  justify-items: center;
+  text-align: center;
   gap: 8px;
 }
 .scrub-times {
+  width: 100%;
   display: flex;
   justify-content: space-between;
   color: var(--muted);
@@ -84,6 +85,13 @@ button:hover { background: #2d3a56; }
 #position {
   width: 100%;
   accent-color: var(--accent);
+  align-self: center;
+}
+.controls-row {
+  justify-content: center;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
 }
 
 .art-wrap {
@@ -132,6 +140,7 @@ button:hover { background: #2d3a56; }
   display: inline-block;
   width: 18px;
   height: 18px;
+  vertical-align: middle;
 }
 .icon-ghost {
   background: transparent;
