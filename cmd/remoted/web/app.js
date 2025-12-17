@@ -27,6 +27,7 @@ const volSlider = el("volume");
 
 let ws;
 let wsReconnectTimer;
+let wsReady = false;
 let lastPlayerPref = "";
 let currentPlayer = ""; // empty string means Auto mode (server decides)
 let isMuted = false;
@@ -35,6 +36,7 @@ let durationMs = 0;
 let lastUpdateTs = 0;
 let isPlaying = false;
 let userScrubbing = false;
+let foregroundRefreshInFlight = false;
 
 function currentPositionMillis() {
   if (!isPlaying || durationMs <= 0) {
@@ -218,6 +220,7 @@ function stopWS() {
     ws.close();
     ws = null;
   }
+  wsReady = false;
 }
 
 function startWS() {
@@ -231,6 +234,7 @@ function startWS() {
   try {
     ws = new WebSocket(wsUri);
     ws.onmessage = (evt) => {
+      if (!wsReady) return;
       try {
         const data = JSON.parse(evt.data);
         if (data.error) {
@@ -242,7 +246,10 @@ function startWS() {
         statusLine.textContent = `WS parse error: ${e.message}`;
       }
     };
-    ws.onopen = () => (statusLine.textContent = "Connected (WS)");
+    ws.onopen = () => {
+      wsReady = true;
+      statusLine.textContent = "Connected (WS)";
+    };
     ws.onclose = () => {
       statusLine.textContent = "Disconnected";
       wsReconnectTimer = setTimeout(startWS, 1500);
@@ -253,6 +260,22 @@ function startWS() {
     };
   } catch (err) {
     statusLine.textContent = `WS failed: ${err.message}`;
+  }
+}
+
+async function foregroundRefresh() {
+  if (document.visibilityState !== "visible") return;
+  if (foregroundRefreshInFlight) return;
+  foregroundRefreshInFlight = true;
+  try {
+    stopWS();
+    await loadPlayers();
+    await syncVolume();
+    startWS();
+  } catch (err) {
+    statusLine.textContent = `Refresh failed: ${err.message}`;
+  } finally {
+    foregroundRefreshInFlight = false;
   }
 }
 
@@ -356,18 +379,20 @@ async function init() {
   await bindControls();
   connectBtn.onclick = async () => {
     savePrefs();
-    stopWS();
-    await loadPlayers();
-    await syncVolume();
-    startWS();
+    await foregroundRefresh();
   };
   refreshBtn.onclick = async () => {
     await loadPlayers();
     await syncVolume();
   };
-  await loadPlayers();
-  await syncVolume();
-  startWS();
+  await foregroundRefresh();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      foregroundRefresh();
+    } else {
+      stopWS();
+    }
+  });
   requestAnimationFrame(tick);
 }
 
