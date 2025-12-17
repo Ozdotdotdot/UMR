@@ -36,6 +36,14 @@ let lastUpdateTs = 0;
 let isPlaying = false;
 let userScrubbing = false;
 
+function currentPositionMillis() {
+  if (!isPlaying || durationMs <= 0) {
+    return lastPositionMs;
+  }
+  const elapsed = performance.now() - lastUpdateTs;
+  return Math.min(durationMs, lastPositionMs + elapsed);
+}
+
 function loadPrefs() {
   const token = localStorage.getItem("umr_token") || "";
   lastPlayerPref = localStorage.getItem("umr_player") || "";
@@ -302,11 +310,12 @@ async function bindControls() {
   });
   positionSlider.addEventListener("change", async (e) => {
     const val = parseInt(e.target.value, 10) || 0;
-    const delta = val - lastPositionMs;
+    const currentPos = currentPositionMillis();
+    const delta = val - currentPos;
     userScrubbing = false;
     if (durationMs === 0) return;
     try {
-      await postJSON("/player/seek", { delta_ms: delta }, playerParam());
+      await postJSON("/player/seek", { target_ms: val, delta_ms: Math.round(delta) }, playerParam());
       lastPositionMs = val;
       lastUpdateTs = performance.now();
     } catch (err) {

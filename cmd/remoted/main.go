@@ -226,6 +226,7 @@ type playerInfo struct {
 	IsActive       bool   `json:"is_active"`
 	PositionMillis int64  `json:"position_millis,omitempty"`
 	LengthMillis   int64  `json:"length_millis,omitempty"`
+	TrackID        string `json:"track_id,omitempty"`
 	Title          string `json:"title,omitempty"`
 	Artist         string `json:"artist,omitempty"`
 	Album          string `json:"album,omitempty"`
@@ -512,7 +513,8 @@ func controlHandler(w http.ResponseWriter, r *http.Request, method string) {
 }
 
 type seekRequest struct {
-	DeltaMillis int64 `json:"delta_ms"`
+	DeltaMillis  *int64 `json:"delta_ms,omitempty"`
+	TargetMillis *int64 `json:"target_ms,omitempty"`
 }
 
 func seekHandler(w http.ResponseWriter, r *http.Request) {
@@ -526,8 +528,8 @@ func seekHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
-	if req.DeltaMillis == 0 {
-		http.Error(w, "delta_ms required", http.StatusBadRequest)
+	if req.DeltaMillis == nil && req.TargetMillis == nil {
+		http.Error(w, "delta_ms or target_ms required", http.StatusBadRequest)
 		return
 	}
 
@@ -541,9 +543,24 @@ func seekHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := seekPlayer(ctx, info.BusName, req.DeltaMillis); err != nil {
-		http.Error(w, fmt.Sprintf("seek: %v", err), http.StatusInternalServerError)
-		return
+	switch {
+	case req.TargetMillis != nil:
+		if err := setPlayerPosition(ctx, info.BusName, info.TrackID, *req.TargetMillis); err != nil {
+			// Fallback to relative seek if track ID missing or SetPosition not supported.
+			if req.DeltaMillis == nil {
+				http.Error(w, fmt.Sprintf("seek absolute: %v", err), http.StatusInternalServerError)
+				return
+			}
+			if err := seekPlayer(ctx, info.BusName, *req.DeltaMillis); err != nil {
+				http.Error(w, fmt.Sprintf("seek absolute fallback: %v", err), http.StatusInternalServerError)
+				return
+			}
+		}
+	case req.DeltaMillis != nil:
+		if err := seekPlayer(ctx, info.BusName, *req.DeltaMillis); err != nil {
+			http.Error(w, fmt.Sprintf("seek: %v", err), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	setLastPlayer(info.BusName)
@@ -555,6 +572,7 @@ func seekHandler(w http.ResponseWriter, r *http.Request) {
 		"player": info.Identity,
 		"action": "seek",
 		"delta":  req.DeltaMillis,
+		"target": req.TargetMillis,
 		"status": "ok",
 	})
 }
@@ -584,6 +602,24 @@ func seekPlayer(ctx context.Context, busName string, deltaMillis int64) error {
 	obj := conn.Object(busName, "/org/mpris/MediaPlayer2")
 	offsetMicros := deltaMillis * 1000
 	call := obj.CallWithContext(ctx, "org.mpris.MediaPlayer2.Player.Seek", 0, offsetMicros)
+	if call.Err != nil {
+		return call.Err
+	}
+	return nil
+}
+
+func setPlayerPosition(ctx context.Context, busName, trackID string, targetMillis int64) error {
+	if trackID == "" {
+		return fmt.Errorf("track ID is required for absolute seek")
+	}
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		return fmt.Errorf("session bus: %w", err)
+	}
+	defer conn.Close()
+
+	obj := conn.Object(busName, "/org/mpris/MediaPlayer2")
+	call := obj.CallWithContext(ctx, "org.mpris.MediaPlayer2.Player.SetPosition", 0, dbus.ObjectPath(trackID), targetMillis*1000)
 	if call.Err != nil {
 		return call.Err
 	}
@@ -770,6 +806,9 @@ func asString(v dbus.Variant) string {
 	if s, ok := v.Value().(string); ok {
 		return s
 	}
+	if p, ok := v.Value().(dbus.ObjectPath); ok {
+		return string(p)
+	}
 	return ""
 }
 
@@ -814,6 +853,9 @@ func populateMetadata(info *playerInfo, meta dbus.Variant) {
 	}
 	if artist, ok := raw["xesam:artist"]; ok {
 		info.Artist = firstString(artist)
+	}
+	if trackID, ok := raw["mpris:trackid"]; ok {
+		info.TrackID = asString(trackID)
 	}
 	if length, ok := raw["mpris:length"]; ok {
 		info.LengthMillis = asInt64(length) / 1000
