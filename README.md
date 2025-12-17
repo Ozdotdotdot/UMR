@@ -15,7 +15,7 @@ Go daemon + web UI for remote media control on Linux (MPRIS playback + PipeWire/
 
 ## Install (Go users)
 ```bash
-go install github.com/myusername/UMR/cmd/remoted@latest
+go install github.com/ozdotdotdot/UMR/cmd/remoted@latest
 ```
 Notes:
 - Binary name: `remoted`; ensure `$GOBIN` (or `$GOPATH/bin`) is on your `PATH`.
