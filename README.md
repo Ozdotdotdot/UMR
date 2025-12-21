@@ -7,6 +7,7 @@ Go daemon + web UI for remote media control on Linux (MPRIS playback + PipeWire/
 - Play/pause, next/prev, ±10s seek, arbitrary seek via scrubber, volume set/delta/mute.
 - Artwork proxying for local `file://` art (under `/tmp`/`/var/tmp`).
 - HTTP API + browser UI (`/ui`).
+- Progressive Web App enabled for mobile interfaces. Can now "add to homescreen" on iOS for easy and native-feeling access.
 
 ## Prereqs
 - Linux desktop with MPRIS-capable players and DBus (standard on most distros).
