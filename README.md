@@ -30,7 +30,7 @@ Release tarballs include ready-to-run binaries:
 Download and unpack:
 ```bash
 tar -xf remoted-linux-amd64.tar.gz
-./remoted
+./remoted-linux-amd64
 ```
 
 ## Configure / Run
@@ -57,6 +57,10 @@ Health check:
 ```bash
 curl http://127.0.0.1:8080/healthz
 ```
+
+## Optional add-ons
+- Chromium URL helper: Chromium doesn’t expose tab URLs over MPRIS. A tiny local extension can POST the active media tab URL to `http://127.0.0.1:8080/player/url` (with your token) so YouTube thumbnails and TMDb lookups work in Chromium. Load the helper as an unpacked extension (Developer Mode in `chrome://extensions`); Firefox already exposes URLs and doesn’t need this.
+- TMDb fallback art: set `REMOTED_TMDB_KEY` (or `-tmdb-key`) to enable TMDb lookups for HBO/Max sessions that lack artwork. Uses a quick search (prefers exact title match, else most popular TV/movie with a poster), cached ~12h, w342 poster size, 2s timeout. Requires a TMDb account and an API (free)
 
 ## API
 See `docs/API.md` for endpoints, auth, and examples (players, nowplaying, playback controls, seek, volume, art proxy).
