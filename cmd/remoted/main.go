@@ -48,6 +48,7 @@ var (
 )
 
 var globalHub *wsHub
+var playerURLs = newPlayerURLStore()
 
 //go:embed web/*
 var webFS embed.FS
@@ -59,6 +60,69 @@ type Config struct {
 	Version      string
 	ArtCache     string
 	PrintVersion bool
+}
+
+type playerURLRecord struct {
+	URL       string
+	TrackID   string
+	UpdatedAt time.Time
+}
+
+type playerURLStore struct {
+	mu   sync.RWMutex
+	urls map[string]playerURLRecord
+}
+
+func newPlayerURLStore() *playerURLStore {
+	return &playerURLStore{urls: make(map[string]playerURLRecord)}
+}
+
+func (s *playerURLStore) key(bus, trackID string) string {
+	if trackID == "" {
+		return bus
+	}
+	return bus + "|" + trackID
+}
+
+func (s *playerURLStore) Set(bus, trackID, url string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec := playerURLRecord{
+		URL:       url,
+		TrackID:   trackID,
+		UpdatedAt: time.Now(),
+	}
+	s.urls[s.key(bus, trackID)] = rec
+	// Also store a bus-only entry so we can reuse the URL if the track changes but the bus stays the same.
+	if trackID != "" {
+		s.urls[s.key(bus, "")] = rec
+	}
+}
+
+func (s *playerURLStore) Get(bus, trackID string) string {
+	const ttl = 10 * time.Minute
+	keyExact := s.key(bus, trackID)
+	keyBus := s.key(bus, "")
+
+	s.mu.RLock()
+	rec, ok := s.urls[keyExact]
+	if !ok && keyExact != keyBus {
+		rec, ok = s.urls[keyBus]
+	}
+	s.mu.RUnlock()
+	if !ok {
+		return ""
+	}
+	if time.Since(rec.UpdatedAt) > ttl {
+		s.mu.Lock()
+		delete(s.urls, keyExact)
+		if keyExact != keyBus {
+			delete(s.urls, keyBus)
+		}
+		s.mu.Unlock()
+		return ""
+	}
+	return rec.URL
 }
 
 type healthResponse struct {
@@ -101,6 +165,7 @@ func main() {
 	mux.Handle("/player/prev", requireToken(cfg.Token, http.HandlerFunc(previousHandler)))
 	mux.Handle("/player/seek", requireToken(cfg.Token, http.HandlerFunc(seekHandler)))
 	mux.Handle("/volume", requireToken(cfg.Token, http.HandlerFunc(volumeHandler)))
+	mux.Handle("/player/url", requireToken(cfg.Token, http.HandlerFunc(setPlayerURLHandler)))
 	mux.Handle("/art/", requireToken(cfg.Token, http.HandlerFunc(artHandler)))
 	mux.Handle("/ws", requireToken(cfg.Token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsHandler(hub, w, r)
@@ -747,6 +812,12 @@ func fetchPlayerInfo(ctx context.Context, conn *dbus.Conn, busName string) (play
 		info.PositionMillis = asInt64(positionVariant) / 1000
 	}
 
+	if info.URL == "" {
+		if stored := playerURLs.Get(busName, info.TrackID); stored != "" {
+			info.URL = stored
+		}
+	}
+
 	return info, nil
 }
 
@@ -1260,4 +1331,35 @@ func extractToken(r *http.Request) string {
 		return token
 	}
 	return ""
+}
+
+type setPlayerURLRequest struct {
+	BusName string `json:"bus_name"`
+	TrackID string `json:"track_id,omitempty"`
+	URL     string `json:"url"`
+}
+
+func setPlayerURLHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req setPlayerURLRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	req.BusName = strings.TrimSpace(req.BusName)
+	req.URL = strings.TrimSpace(req.URL)
+	if req.BusName == "" || req.URL == "" {
+		http.Error(w, "bus_name and url required", http.StatusBadRequest)
+		return
+	}
+	u, err := url.Parse(req.URL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		http.Error(w, "url must be http/https", http.StatusBadRequest)
+		return
+	}
+	playerURLs.Set(req.BusName, req.TrackID, req.URL)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

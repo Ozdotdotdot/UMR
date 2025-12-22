@@ -36,6 +36,15 @@ You can pin a player by bus name or identity via `?player=org.mpris.MediaPlayer2
 - `GET /player/status` — returns a single player (auto-selected unless `?player=` provided).
 - `GET /nowplaying` — alias of `/player/status` (same selection rules).
 
+### Supplemental URL (for browsers that don’t expose it via MPRIS)
+- `POST /player/url` — set a URL for a player when the MPRIS metadata lacks `xesam:url` (e.g., Chromium). JSON body:
+  ```json
+  { "bus_name": "org.mpris.MediaPlayer2.chromium.instance123", "track_id": "/org/chromium/…", "url": "https://example.com" }
+  ```
+  - `bus_name` required; `track_id` optional (helps disambiguate if the bus reuses track IDs).
+  - Requires the bearer token when configured.
+  - Stored URLs expire after ~10 minutes; requests must be HTTP/HTTPS.
+
 ### Playback controls
 - `POST /player/playpause` — toggles play/pause (uses Play/Pause explicitly, fallback to PlayPause).
 - `POST /player/next` — next track.

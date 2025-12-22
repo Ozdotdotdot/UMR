@@ -1,0 +1,8 @@
+{
+  "name": "UMR URL Bridge",
+  "version": "0.1",
+  "manifest_version": 3,
+  "permissions": ["tabs"],
+  "host_permissions": ["http://127.0.0.1:8080/*"],
+  "background": { "service_worker": "background.js" }
+}
