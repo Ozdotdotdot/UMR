@@ -106,11 +106,18 @@ function updateUI(info) {
 }
 
 function pickArt(info) {
+  if (isNetflix(info)) return "/static/netflix_icon.svg";
   const thumb = youtubeThumbFromURL(info.url || "");
   if (thumb) return thumb;
   if (info.art_url_proxy) return info.art_url_proxy;
   if (info.art_url) return info.art_url;
   return "";
+}
+
+function isNetflix(info) {
+  const t = (info.title || "").toLowerCase();
+  const id = (info.identity || "").toLowerCase();
+  return t === "netflix" || id === "netflix";
 }
 
 function youtubeThumbFromURL(url) {
