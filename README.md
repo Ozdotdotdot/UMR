@@ -1,9 +1,9 @@
 # remoted
 
 Go daemon + web UI for remote media control on Linux (MPRIS playback + PipeWire/PulseAudio volume). Includes a live now-playing page with artwork, transport controls, seek bar, and volume.
-
-<img src="media/IMG_5396.PNG" alt="Mobile UI showing playback controls and artwork" width="320">
-
+<div align="center">
+  <img src="media/IMG_5396.PNG" alt="Mobile UI showing playback controls and artwork" width="380">
+</div>
 ## Features
 - Auto player selection with manual override; WebSocket push updates (no polling).
 - Play/pause, next/prev, ±10s seek, arbitrary seek via scrubber, volume set/delta/mute.
