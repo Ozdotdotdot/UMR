@@ -106,10 +106,11 @@ function updateUI(info) {
 }
 
 function pickArt(info) {
+  const thumb = youtubeThumbFromURL(info.url || "");
+  if (thumb) return thumb;
   if (info.art_url_proxy) return info.art_url_proxy;
   if (info.art_url) return info.art_url;
-  const thumb = youtubeThumbFromURL(info.url || "");
-  return thumb || "";
+  return "";
 }
 
 function youtubeThumbFromURL(url) {
