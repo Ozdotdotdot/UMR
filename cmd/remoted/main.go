@@ -45,7 +45,21 @@ var (
 
 var (
 	artCacheDir string
+	tmdbKey     string
 )
+
+type tmdbCacheEntry struct {
+	URL       string
+	StoredAt  time.Time
+	Errored   bool
+	Provider  string
+	QueryName string
+}
+
+var tmdbCache = struct {
+	mu    sync.RWMutex
+	store map[string]tmdbCacheEntry
+}{store: make(map[string]tmdbCacheEntry)}
 
 var globalHub *wsHub
 var playerURLs = newPlayerURLStore()
@@ -59,6 +73,7 @@ type Config struct {
 	Token        string
 	Version      string
 	ArtCache     string
+	TMDBKey      string
 	PrintVersion bool
 }
 
@@ -142,6 +157,7 @@ func main() {
 		return
 	}
 	artCacheDir = cfg.ArtCache
+	tmdbKey = strings.TrimSpace(cfg.TMDBKey)
 	if err := os.MkdirAll(artCacheDir, 0o755); err != nil {
 		log.Fatalf("failed to create art cache dir: %v", err)
 	}
@@ -212,6 +228,7 @@ func parseConfig() Config {
 	defaultToken := os.Getenv("REMOTED_TOKEN")
 	envVersion := getenvDefault("REMOTED_VERSION", defaultVersion)
 	defaultArt := getenvDefault("REMOTED_ART_CACHE", defaultArtCacheDir())
+	defaultTMDB := os.Getenv("REMOTED_TMDB_KEY")
 
 	var cfg Config
 	flag.StringVar(&cfg.BindAddr, "bind", defaultBind, "bind address (default from REMOTED_BIND)")
@@ -219,6 +236,7 @@ func parseConfig() Config {
 	flag.StringVar(&cfg.Token, "token", defaultToken, "bearer token for API/UI (default from REMOTED_TOKEN)")
 	flag.StringVar(&cfg.Version, "version", envVersion, "version string to report (default from REMOTED_VERSION)")
 	flag.StringVar(&cfg.ArtCache, "art-cache", defaultArt, "artwork cache directory (default from REMOTED_ART_CACHE)")
+	flag.StringVar(&cfg.TMDBKey, "tmdb-key", defaultTMDB, "TMDb API key (default from REMOTED_TMDB_KEY)")
 	flag.BoolVar(&cfg.PrintVersion, "v", false, "print version and exit")
 
 	flag.Usage = func() {
@@ -298,6 +316,7 @@ type playerInfo struct {
 	URL            string `json:"url,omitempty"`
 	ArtURL         string `json:"art_url,omitempty"`
 	ArtURLProxy    string `json:"art_url_proxy,omitempty"`
+	ArtHint        string `json:"art_hint,omitempty"`
 }
 
 type wsClient struct {
@@ -818,6 +837,14 @@ func fetchPlayerInfo(ctx context.Context, conn *dbus.Conn, busName string) (play
 		}
 	}
 
+	// If we have no art from the player, attempt TMDb lookup for HBO/Max titles (when URL or identity suggests it).
+	if info.ArtURL == "" && info.ArtURLProxy == "" && tmdbKey != "" && isHBO(info) {
+		if art := tmdbLookup(ctx, info.Title); art != "" {
+			info.ArtURL = art
+			info.ArtHint = "tmdb"
+		}
+	}
+
 	return info, nil
 }
 
@@ -1331,6 +1358,112 @@ func extractToken(r *http.Request) string {
 		return token
 	}
 	return ""
+}
+
+func isHBO(info playerInfo) bool {
+	urlLower := strings.ToLower(info.URL)
+	if strings.Contains(urlLower, "play.hbomax.com") || strings.Contains(urlLower, "max.com") {
+		return true
+	}
+	id := strings.ToLower(info.Identity)
+	return strings.Contains(id, "hbo") || strings.Contains(id, "max")
+}
+
+func tmdbLookup(ctx context.Context, title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+
+	cacheKey := strings.ToLower(title)
+	now := time.Now()
+
+	// cache read
+	tmdbCache.mu.RLock()
+	if entry, ok := tmdbCache.store[cacheKey]; ok {
+		if now.Sub(entry.StoredAt) < 12*time.Hour {
+			if entry.Errored {
+				tmdbCache.mu.RUnlock()
+				return ""
+			}
+			tmdbCache.mu.RUnlock()
+			return entry.URL
+		}
+	}
+	tmdbCache.mu.RUnlock()
+
+	art, err := tmdbSearchTV(ctx, title)
+	tmdbCache.mu.Lock()
+	tmdbCache.store[cacheKey] = tmdbCacheEntry{
+		URL:      art,
+		StoredAt: now,
+		Errored:  err != nil || art == "",
+	}
+	tmdbCache.mu.Unlock()
+	return art
+}
+
+func tmdbSearchTV(ctx context.Context, query string) (string, error) {
+	if tmdbKey == "" {
+		return "", fmt.Errorf("tmdb key missing")
+	}
+	// avoid overly long queries
+	if len(query) > 200 {
+		query = query[:200]
+	}
+
+	client := http.Client{Timeout: 2 * time.Second}
+	u := url.URL{
+		Scheme: "https",
+		Host:   "api.themoviedb.org",
+		Path:   "/3/search/tv",
+	}
+	q := u.Query()
+	q.Set("api_key", tmdbKey)
+	q.Set("query", query)
+	q.Set("language", "en-US")
+	q.Set("page", "1")
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("tmdb status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Results []struct {
+			Name       string  `json:"name"`
+			PosterPath string  `json:"poster_path"`
+			Popularity float64 `json:"popularity"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	if len(result.Results) == 0 {
+		return "", fmt.Errorf("no results")
+	}
+
+	best := result.Results[0]
+	for _, r := range result.Results {
+		if r.Popularity > best.Popularity {
+			best = r
+		}
+	}
+	if best.PosterPath == "" {
+		return "", fmt.Errorf("no poster")
+	}
+	return "https://image.tmdb.org/t/p/w342" + best.PosterPath, nil
 }
 
 type setPlayerURLRequest struct {

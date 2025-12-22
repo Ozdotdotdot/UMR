@@ -35,6 +35,7 @@ You can pin a player by bus name or identity via `?player=org.mpris.MediaPlayer2
 - `GET /players` — lists MPRIS players with identity, playback status, metadata (title, artist, album, length, position, url), and artwork URLs (`art_url`, `art_url_proxy`).
 - `GET /player/status` — returns a single player (auto-selected unless `?player=` provided).
 - `GET /nowplaying` — alias of `/player/status` (same selection rules).
+- `art_hint` may appear (e.g., `"tmdb"`) to indicate the source of populated artwork.
 
 ### Supplemental URL (for browsers that don’t expose it via MPRIS)
 - `POST /player/url` — set a URL for a player when the MPRIS metadata lacks `xesam:url` (e.g., Chromium). JSON body:
@@ -44,6 +45,9 @@ You can pin a player by bus name or identity via `?player=org.mpris.MediaPlayer2
   - `bus_name` required; `track_id` optional (helps disambiguate if the bus reuses track IDs).
   - Requires the bearer token when configured.
   - Stored URLs expire after ~10 minutes; requests must be HTTP/HTTPS.
+
+### TMDb-backed artwork (optional)
+- If `REMOTED_TMDB_KEY` (or `-tmdb-key`) is set, remoted will attempt a TMDb TV search for HBO/Max sessions (detected via URL/identity) when the player does not provide artwork. Successful lookups set `art_url` and `art_hint:"tmdb"`. Cached for ~12h; 2s timeout; w342 poster size.
 
 ### Playback controls
 - `POST /player/playpause` — toggles play/pause (uses Play/Pause explicitly, fallback to PlayPause).

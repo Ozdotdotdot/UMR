@@ -39,6 +39,7 @@ You can configure with env vars or flags (flags override env defaults):
 - `REMOTED_PORT` / `-port` — listen port (default `8080`)
 - `REMOTED_TOKEN` / `-token` — bearer token (required for everything except `/healthz` when set)
 - `REMOTED_ART_CACHE` / `-art-cache` — art cache dir (default `~/.cache/umr/art` or `/tmp/umr/art`)
+- `REMOTED_TMDB_KEY` / `-tmdb-key` — optional TMDb API key; enables fallback art for HBO/Max titles
 - `-version` (string) or `-v` (print version and exit)
 
 Examples:
