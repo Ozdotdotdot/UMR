@@ -23,6 +23,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/godbus/dbus/v5"
 	"nhooyr.io/websocket"
@@ -1392,7 +1393,7 @@ func tmdbLookup(ctx context.Context, title string) string {
 	}
 	tmdbCache.mu.RUnlock()
 
-	art, err := tmdbSearchTV(ctx, title)
+	art, err := tmdbSearchTitle(ctx, title)
 	tmdbCache.mu.Lock()
 	tmdbCache.store[cacheKey] = tmdbCacheEntry{
 		URL:      art,
@@ -1403,7 +1404,17 @@ func tmdbLookup(ctx context.Context, title string) string {
 	return art
 }
 
-func tmdbSearchTV(ctx context.Context, query string) (string, error) {
+func normalizeTitle(s string) string {
+	clean := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsSpace(r) {
+			return unicode.ToLower(r)
+		}
+		return -1
+	}, s)
+	return strings.Join(strings.Fields(clean), " ")
+}
+
+func tmdbSearchTitle(ctx context.Context, query string) (string, error) {
 	if tmdbKey == "" {
 		return "", fmt.Errorf("tmdb key missing")
 	}
@@ -1416,7 +1427,7 @@ func tmdbSearchTV(ctx context.Context, query string) (string, error) {
 	u := url.URL{
 		Scheme: "https",
 		Host:   "api.themoviedb.org",
-		Path:   "/3/search/tv",
+		Path:   "/3/search/multi",
 	}
 	q := u.Query()
 	q.Set("api_key", tmdbKey)
@@ -1439,12 +1450,18 @@ func tmdbSearchTV(ctx context.Context, query string) (string, error) {
 		return "", fmt.Errorf("tmdb status %d", resp.StatusCode)
 	}
 
+	type tmdbResult struct {
+		MediaType     string  `json:"media_type"`
+		Name          string  `json:"name"`
+		Title         string  `json:"title"`
+		OriginalName  string  `json:"original_name"`
+		OriginalTitle string  `json:"original_title"`
+		PosterPath    string  `json:"poster_path"`
+		Popularity    float64 `json:"popularity"`
+	}
+
 	var result struct {
-		Results []struct {
-			Name       string  `json:"name"`
-			PosterPath string  `json:"poster_path"`
-			Popularity float64 `json:"popularity"`
-		} `json:"results"`
+		Results []tmdbResult `json:"results"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err
@@ -1454,16 +1471,42 @@ func tmdbSearchTV(ctx context.Context, query string) (string, error) {
 		return "", fmt.Errorf("no results")
 	}
 
-	best := result.Results[0]
+	needle := normalizeTitle(query)
+	var bestExact *tmdbResult
+	var bestPop *tmdbResult
 	for _, r := range result.Results {
-		if r.Popularity > best.Popularity {
-			best = r
+		if r.MediaType != "tv" && r.MediaType != "movie" {
+			continue
+		}
+		if bestPop == nil || r.Popularity > bestPop.Popularity {
+			rCopy := r
+			bestPop = &rCopy
+		}
+		if r.PosterPath == "" {
+			continue
+		}
+		if normalizeTitle(r.Name) == needle ||
+			normalizeTitle(r.Title) == needle ||
+			normalizeTitle(r.OriginalName) == needle ||
+			normalizeTitle(r.OriginalTitle) == needle {
+			if bestExact == nil || r.Popularity > bestExact.Popularity {
+				rCopy := r
+				bestExact = &rCopy
+			}
 		}
 	}
-	if best.PosterPath == "" {
+
+	var chosen *tmdbResult
+	if bestExact != nil {
+		chosen = bestExact
+	} else {
+		chosen = bestPop
+	}
+
+	if chosen == nil || chosen.PosterPath == "" {
 		return "", fmt.Errorf("no poster")
 	}
-	return "https://image.tmdb.org/t/p/w342" + best.PosterPath, nil
+	return "https://image.tmdb.org/t/p/w342" + chosen.PosterPath, nil
 }
 
 type setPlayerURLRequest struct {

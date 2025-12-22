@@ -47,7 +47,10 @@ You can pin a player by bus name or identity via `?player=org.mpris.MediaPlayer2
   - Stored URLs expire after ~10 minutes; requests must be HTTP/HTTPS.
 
 ### TMDb-backed artwork (optional)
-- If `REMOTED_TMDB_KEY` (or `-tmdb-key`) is set, remoted will attempt a TMDb TV search for HBO/Max sessions (detected via URL/identity) when the player does not provide artwork. Successful lookups set `art_url` and `art_hint:"tmdb"`. Cached for ~12h; 2s timeout; w342 poster size.
+- If `REMOTED_TMDB_KEY` (or `-tmdb-key`) is set, remoted will attempt a TMDb search (tv/movie) for HBO/Max sessions (detected via URL/identity) when the player does not provide artwork. It prefers an exact normalized title match, else falls back to the most popular TV/movie result with a poster. Successful lookups set `art_url` and `art_hint:"tmdb"`. Cached for ~12h; 2s timeout; w342 poster size.
+
+### Chromium URL helper (optional)
+- Chromium does not expose `xesam:url` via MPRIS. An optional helper extension can POST the active media tab URL to `/player/url` (token-protected) so remoted can derive YouTube thumbnails or run TMDb lookups. Firefox already exposes `url` via MPRIS and does not need the helper.
 
 ### Playback controls
 - `POST /player/playpause` — toggles play/pause (uses Play/Pause explicitly, fallback to PlayPause).
