@@ -32,7 +32,7 @@ You can pin a player by bus name or identity via `?player=org.mpris.MediaPlayer2
 - `GET /healthz` — open; returns status/version/uptime.
 
 ### Players + metadata
-- `GET /players` — lists MPRIS players with identity, playback status, metadata (title, artist, album, length, position), and artwork URLs (`art_url`, `art_url_proxy`).
+- `GET /players` — lists MPRIS players with identity, playback status, metadata (title, artist, album, length, position, url), and artwork URLs (`art_url`, `art_url_proxy`).
 - `GET /player/status` — returns a single player (auto-selected unless `?player=` provided).
 - `GET /nowplaying` — alias of `/player/status` (same selection rules).
 

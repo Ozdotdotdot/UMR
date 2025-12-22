@@ -100,9 +100,34 @@ function updateUI(info) {
   statusEl.textContent = info.playback_status || "";
   setPlayPauseIcon(info.playback_status);
   updateScrubber(info);
-  const art = info.art_url_proxy || info.art_url || "";
+  const art = pickArt(info);
   artImg.src = art || "";
   statusLine.textContent = `Player: ${info.identity || info.bus_name || "auto"} | ${new Date().toLocaleTimeString()}`;
+}
+
+function pickArt(info) {
+  if (info.art_url_proxy) return info.art_url_proxy;
+  if (info.art_url) return info.art_url;
+  const thumb = youtubeThumbFromURL(info.url || "");
+  return thumb || "";
+}
+
+function youtubeThumbFromURL(url) {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    if (!/^(www\.)?youtube\.com$/.test(u.hostname) && u.hostname !== "youtu.be") return "";
+    let id = "";
+    if (u.hostname === "youtu.be") {
+      id = u.pathname.slice(1);
+    } else {
+      id = u.searchParams.get("v") || "";
+    }
+    if (!id) return "";
+    return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+  } catch (e) {
+    return "";
+  }
 }
 
 function setPlayPauseIcon(status) {

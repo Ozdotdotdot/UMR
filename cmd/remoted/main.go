@@ -230,6 +230,7 @@ type playerInfo struct {
 	Title          string `json:"title,omitempty"`
 	Artist         string `json:"artist,omitempty"`
 	Album          string `json:"album,omitempty"`
+	URL            string `json:"url,omitempty"`
 	ArtURL         string `json:"art_url,omitempty"`
 	ArtURLProxy    string `json:"art_url_proxy,omitempty"`
 }
@@ -853,6 +854,9 @@ func populateMetadata(info *playerInfo, meta dbus.Variant) {
 	}
 	if artist, ok := raw["xesam:artist"]; ok {
 		info.Artist = firstString(artist)
+	}
+	if url, ok := raw["xesam:url"]; ok {
+		info.URL = asString(url)
 	}
 	if trackID, ok := raw["mpris:trackid"]; ok {
 		info.TrackID = asString(trackID)
