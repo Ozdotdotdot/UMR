@@ -24,6 +24,7 @@ const volUpBtn = el("vol-up");
 const muteBtn = el("mute");
 const muteIcon = el("mute-icon");
 const volSlider = el("volume");
+const fallbackArt = "/static/noartworkfound.svg";
 
 let ws;
 let wsReconnectTimer;
@@ -37,6 +38,13 @@ let lastUpdateTs = 0;
 let isPlaying = false;
 let userScrubbing = false;
 let foregroundRefreshInFlight = false;
+
+artImg.dataset.fallback = "true";
+artImg.onerror = () => {
+  if (artImg.dataset.fallback === "true") return;
+  artImg.dataset.fallback = "true";
+  artImg.src = fallbackArt;
+};
 
 function currentPositionMillis() {
   if (!isPlaying || durationMs <= 0) {
@@ -101,7 +109,7 @@ function updateUI(info) {
   setPlayPauseIcon(info.playback_status);
   updateScrubber(info);
   const art = pickArt(info);
-  artImg.src = art || "";
+  setArtImage(art);
   statusLine.textContent = `Player: ${info.identity || info.bus_name || "auto"} | ${new Date().toLocaleTimeString()}`;
 }
 
@@ -111,7 +119,7 @@ function pickArt(info) {
   if (thumb) return thumb;
   if (info.art_url_proxy) return info.art_url_proxy;
   if (info.art_url) return info.art_url;
-  return "/static/noartworkfound.svg";
+  return fallbackArt;
 }
 
 function isNetflix(info) {
@@ -247,6 +255,12 @@ async function loadPlayers() {
   }
 }
 
+function setArtImage(src) {
+  const next = src || fallbackArt;
+  artImg.dataset.fallback = next === fallbackArt ? "true" : "false";
+  artImg.src = next;
+}
+
 function stopWS() {
   clearTimeout(wsReconnectTimer);
   if (ws) {
@@ -303,6 +317,7 @@ async function foregroundRefresh() {
   try {
     stopWS();
     await loadPlayers();
+    await loadNowPlaying();
     await syncVolume();
     startWS();
   } catch (err) {
@@ -407,6 +422,15 @@ async function adjustVolume(delta) {
   }
 }
 
+async function loadNowPlaying() {
+  try {
+    const info = await fetchJSON("/nowplaying", playerParam());
+    updateUI(info);
+  } catch (err) {
+    statusLine.textContent = `Now playing fetch failed: ${err.message}`;
+  }
+}
+
 async function init() {
   loadPrefs();
   await bindControls();
@@ -416,6 +440,7 @@ async function init() {
   };
   refreshBtn.onclick = async () => {
     await loadPlayers();
+    await loadNowPlaying();
     await syncVolume();
   };
   await foregroundRefresh();
