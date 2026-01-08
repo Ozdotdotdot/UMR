@@ -23,7 +23,7 @@ go install github.com/ozdotdotdot/UMR/cmd/remoted@latest
 ```
 Notes:
 - Binary name: `remoted`; ensure `$GOBIN` (or `$GOPATH/bin`) is on your `PATH`.
-- `@latest` resolves to the latest git tag (e.g., `v0.1.0`). Tag and push releases so users get a stable version.
+- `@latest` resolves to the latest git tag (e.g., `v0.1.0`).
 
 ## Install (downloaded binary)
 Release tarballs include ready-to-run binaries:
