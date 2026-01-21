@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Color Extraction Test</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/color-thief/2.4.0/color-thief.min.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+      transition: background-color 0.8s ease-in-out;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    #testImage {
+      max-width: 300px;
+      border: 2px solid #333;
+      border-radius: 8px;
+    }
+    .colors {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .color-box {
+      width: 100px;
+      height: 100px;
+      border: 1px solid #333;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 12px;
+      text-align: center;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin: 10px 5px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Color Extraction Test for UMR</h1>
+
+    <p>This page tests the ColorThief library used in your UMR web app.</p>
+
+    <h2>Test with Spotify Album Art</h2>
+    <img id="testImage" crossorigin="anonymous" src="https://i.scdn.co/image/ab67616d0000b273d0680ec0e1145834fc21aab3" alt="Album Art">
+
+    <button onclick="extractColors()">Extract Colors</button>
+    <button onclick="testNetflix()">Test Netflix Theme</button>
+    <button onclick="testCrunchyroll()">Test Crunchyroll Theme</button>
+
+    <div id="results"></div>
+    <div class="colors" id="colorPalette"></div>
+  </div>
+
+  <script>
+    const colorThief = new ColorThief();
+    const img = document.getElementById('testImage');
+    const results = document.getElementById('results');
+    const colorPalette = document.getElementById('colorPalette');
+
+    function rgbToHex(rgb) {
+      return '#' + rgb.map(x => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? '0' + hex : hex;
+      }).join('');
+    }
+
+    function extractColors() {
+      if (!img.complete) {
+        results.innerHTML = '<p style="color: red;">Image not loaded yet. Wait a moment and try again.</p>';
+        return;
+      }
+
+      try {
+        const palette = colorThief.getPalette(img, 5);
+        const dominant = colorThief.getColor(img);
+
+        results.innerHTML = `
+          <h3>Extracted Colors:</h3>
+          <p><strong>Dominant:</strong> ${rgbToHex(dominant)}</p>
+          <p><strong>Palette:</strong> ${palette.map(c => rgbToHex(c)).join(', ')}</p>
+        `;
+
+        colorPalette.innerHTML = '';
+        palette.forEach((color, idx) => {
+          const div = document.createElement('div');
+          div.className = 'color-box';
+          div.style.backgroundColor = rgbToHex(color);
+          div.textContent = rgbToHex(color);
+          colorPalette.appendChild(div);
+        });
+
+        // Apply to background
+        document.body.style.backgroundColor = rgbToHex(palette[0]);
+
+      } catch (err) {
+        results.innerHTML = `<p style="color: red;">Error: ${err.message}</p>`;
+      }
+    }
+
+    function testNetflix() {
+      const netflix = [229, 9, 20];
+      document.body.style.backgroundColor = '#000000';
+      results.innerHTML = '<h3>Netflix Theme Applied</h3><p>Black background with red accents</p>';
+
+      colorPalette.innerHTML = '';
+      const div = document.createElement('div');
+      div.className = 'color-box';
+      div.style.backgroundColor = rgbToHex(netflix);
+      div.textContent = rgbToHex(netflix);
+      colorPalette.appendChild(div);
+    }
+
+    function testCrunchyroll() {
+      const crunchyroll = [244, 123, 35];
+      document.body.style.backgroundColor = '#171717';
+      results.innerHTML = '<h3>Crunchyroll Theme Applied</h3><p>Dark background with orange accents</p>';
+
+      colorPalette.innerHTML = '';
+      const div = document.createElement('div');
+      div.className = 'color-box';
+      div.style.backgroundColor = rgbToHex(crunchyroll);
+      div.textContent = rgbToHex(crunchyroll);
+      colorPalette.appendChild(div);
+    }
+
+    // Auto-extract when image loads
+    if (img.complete) {
+      extractColors();
+    } else {
+      img.onload = () => {
+        extractColors();
+      };
+    }
+  </script>
+</body>
+</html>

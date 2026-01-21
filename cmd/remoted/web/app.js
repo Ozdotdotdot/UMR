@@ -41,11 +41,292 @@ let isPlaying = false;
 let userScrubbing = false;
 let foregroundRefreshInFlight = false;
 
+// Color theming system
+let currentTheme = null;
+
+// Predefined themes for fallback images
+const fallbackThemes = {
+  netflix: {
+    name: "Netflix",
+    primary: [229, 9, 20],      // Netflix red
+    secondary: [0, 0, 0],        // Black
+    accent: [229, 9, 20],
+    background: [20, 20, 20],
+    backgroundDark: [0, 0, 0]
+  },
+  crunchyroll: {
+    name: "Crunchyroll",
+    primary: [244, 123, 35],     // Crunchyroll orange
+    secondary: [35, 35, 35],
+    accent: [244, 123, 35],
+    background: [23, 23, 23],
+    backgroundDark: [15, 15, 15]
+  },
+  default: {
+    name: "Default",
+    primary: [97, 218, 251],     // Original accent color
+    secondary: [23, 27, 34],
+    accent: [97, 218, 251],
+    background: [15, 17, 21],
+    backgroundDark: [10, 12, 15]
+  }
+};
+
+// Utility: Convert RGB array to hex string
+function rgbToHex(rgb) {
+  return '#' + rgb.map(x => {
+    const hex = x.toString(16);
+    return hex.length === 1 ? '0' + hex : hex;
+  }).join('');
+}
+
+// Utility: Calculate relative luminance for WCAG contrast
+function getLuminance(rgb) {
+  const [r, g, b] = rgb.map(val => {
+    const normalized = val / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : Math.pow((normalized + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+// Utility: Calculate contrast ratio between two colors
+function getContrastRatio(rgb1, rgb2) {
+  const lum1 = getLuminance(rgb1);
+  const lum2 = getLuminance(rgb2);
+  const lighter = Math.max(lum1, lum2);
+  const darker = Math.min(lum1, lum2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+// Utility: Lighten or darken a color to meet contrast requirements
+function adjustColorForContrast(foreground, background, targetRatio = 4.5) {
+  let adjusted = [...foreground];
+  let ratio = getContrastRatio(adjusted, background);
+
+  if (ratio >= targetRatio) return adjusted;
+
+  // Determine if we need to lighten or darken
+  const shouldLighten = getLuminance(foreground) < getLuminance(background);
+
+  // Binary search for the right adjustment
+  let step = shouldLighten ? 10 : -10;
+  let iterations = 0;
+  const maxIterations = 50;
+
+  while (ratio < targetRatio && iterations < maxIterations) {
+    adjusted = adjusted.map(val => {
+      const newVal = val + step;
+      return Math.max(0, Math.min(255, newVal));
+    });
+    ratio = getContrastRatio(adjusted, background);
+    iterations++;
+
+    // If we've hit the bounds, we're done
+    if (adjusted.every(v => v === 0 || v === 255)) break;
+  }
+
+  return adjusted;
+}
+
+// Utility: Create a darker version of a color
+function darkenColor(rgb, factor = 0.3) {
+  return rgb.map(val => Math.round(val * factor));
+}
+
+// Utility: Create a lighter version of a color
+function lightenColor(rgb, factor = 1.5) {
+  return rgb.map(val => Math.min(255, Math.round(val * factor)));
+}
+
+// Extract colors from an image using Vibrant.js
+async function extractColorsFromImage(imgElement) {
+  try {
+    const vibrant = new Vibrant(imgElement);
+    const palette = await vibrant.getPalette();
+
+    // Vibrant.js provides these swatches: Vibrant, Muted, DarkVibrant, DarkMuted, LightVibrant, LightMuted
+    const swatches = {
+      vibrant: palette.Vibrant,
+      muted: palette.Muted,
+      darkVibrant: palette.DarkVibrant,
+      darkMuted: palette.DarkMuted,
+      lightVibrant: palette.LightVibrant,
+      lightMuted: palette.LightMuted
+    };
+
+    // Use DarkMuted for background - this is what Vibrant.js is designed for!
+    // It's a desaturated, dark version of the dominant color - perfect for backgrounds
+    const backgroundSwatch = swatches.darkMuted || swatches.muted || swatches.darkVibrant;
+    if (!backgroundSwatch) {
+      throw new Error("No suitable background color found");
+    }
+
+    // Use Vibrant or LightVibrant for accent - these are the most saturated, eye-catching colors
+    const accentSwatch = swatches.vibrant || swatches.lightVibrant || swatches.darkVibrant;
+    if (!accentSwatch) {
+      throw new Error("No vibrant accent color found");
+    }
+
+    // Extract RGB values
+    const backgroundRgb = backgroundSwatch.rgb.map(Math.round);
+    const accentRgb = accentSwatch.rgb.map(Math.round);
+
+    // For the "primary" color (used for certain UI elements), use the Vibrant swatch
+    // or fallback to DarkVibrant
+    const primarySwatch = swatches.vibrant || swatches.darkVibrant || accentSwatch;
+    const primaryRgb = primarySwatch.rgb.map(Math.round);
+
+    // Create a slightly lighter version of background for cards
+    const cardBg = lightenColor(backgroundRgb, 1.15);
+
+    // Create an even darker version for the page background
+    const pageBg = darkenColor(backgroundRgb, 0.85);
+
+    // Create theme using Vibrant.js's purpose-built swatches
+    const theme = {
+      name: "Extracted",
+      primary: primaryRgb,
+      accent: accentRgb,
+      secondary: (swatches.muted || swatches.lightMuted)?.rgb.map(Math.round) || backgroundRgb,
+      // Use the natural background colors from Vibrant.js
+      background: cardBg,              // Slightly lighter for cards
+      backgroundDark: pageBg           // DarkMuted darkened for page background
+    };
+
+    // Debug log with all swatches
+    console.log('🎨 Vibrant.js extracted swatches:', {
+      darkMuted: swatches.darkMuted ? rgbToHex(swatches.darkMuted.rgb) : 'null',
+      vibrant: swatches.vibrant ? rgbToHex(swatches.vibrant.rgb) : 'null',
+      lightVibrant: swatches.lightVibrant ? rgbToHex(swatches.lightVibrant.rgb) : 'null',
+      muted: swatches.muted ? rgbToHex(swatches.muted.rgb) : 'null'
+    });
+
+    console.log('🎨 Theme colors:', {
+      background: rgbToHex(backgroundRgb),
+      accent: rgbToHex(accentRgb),
+      primary: rgbToHex(primaryRgb)
+    });
+
+    return theme;
+  } catch (err) {
+    throw new Error(`Vibrant.js extraction failed: ${err.message}`);
+  }
+}
+
+// Apply theme colors to CSS variables
+function applyTheme(theme) {
+  if (!theme) return;
+
+  currentTheme = theme;
+  const root = document.documentElement;
+
+  // Adjust colors for accessibility
+  const textColor = [233, 237, 245]; // Original --text color
+  const adjustedPrimary = adjustColorForContrast(theme.primary, theme.background, 4.5);
+  const adjustedAccent = adjustColorForContrast(theme.accent, theme.background, 4.5);
+
+  // Apply theme to CSS variables
+  root.style.setProperty('--bg', rgbToHex(theme.backgroundDark));
+  root.style.setProperty('--card', rgbToHex(theme.background));
+  root.style.setProperty('--accent', rgbToHex(adjustedAccent));
+  root.style.setProperty('--primary', rgbToHex(adjustedPrimary));
+
+  // Keep text colors readable
+  const adjustedText = adjustColorForContrast(textColor, theme.background, 7);
+  root.style.setProperty('--text', rgbToHex(adjustedText));
+
+  // Muted text should have lower contrast
+  const mutedColor = theme.primary.map((val, idx) =>
+    Math.round((val + textColor[idx]) / 2)
+  );
+  root.style.setProperty('--muted', rgbToHex(mutedColor));
+
+  // Button colors - use accent color for prominent interactive elements
+  // Background: darker version of accent for good contrast
+  const buttonBg = darkenColor(theme.accent, 0.5);
+  // Hover: even darker or use primary color for variation
+  const buttonHoverBg = darkenColor(theme.accent, 0.6);
+  root.style.setProperty('--button-bg', rgbToHex(buttonBg));
+  root.style.setProperty('--button-hover-bg', rgbToHex(buttonHoverBg));
+
+  // Button border/outline accent - use the full brightness accent
+  const buttonBorderAccent = adjustColorForContrast(theme.accent, buttonBg, 3);
+  root.style.setProperty('--button-border-accent', rgbToHex(buttonBorderAccent));
+
+  // Status bar background with transparency
+  const statusBarBg = [...theme.backgroundDark];
+  root.style.setProperty('--status-bar-bg', `rgba(${statusBarBg[0]}, ${statusBarBg[1]}, ${statusBarBg[2]}, 0.95)`);
+
+  // Border color for status bar
+  const borderColor = lightenColor(theme.backgroundDark, 1.3);
+  root.style.setProperty('--status-border', rgbToHex(borderColor));
+
+  // Debug logging
+  console.log('🎨 Theme applied:', {
+    name: theme.name,
+    bg: rgbToHex(theme.backgroundDark),
+    card: rgbToHex(theme.background),
+    accent: rgbToHex(adjustedAccent),
+    primary: rgbToHex(adjustedPrimary),
+    buttonBg: rgbToHex(buttonBg),
+    buttonBorderAccent: rgbToHex(buttonBorderAccent)
+  });
+}
+
+// Detect which fallback theme to use based on current media
+function detectFallbackTheme(artSrc, info) {
+  if (!artSrc || artSrc === fallbackArt) {
+    return fallbackThemes.default;
+  }
+
+  if (artSrc.includes('netflix_icon.svg') || (info && isNetflix(info))) {
+    return fallbackThemes.netflix;
+  }
+
+  if (artSrc.includes('crunchyroll_icon.svg') || (info && isCrunchyroll(info))) {
+    return fallbackThemes.crunchyroll;
+  }
+
+  return null; // Will extract from actual artwork
+}
+
+// Main function to update theme based on artwork
+async function updateThemeFromArtwork(imgElement, artSrc, info) {
+  try {
+    // Check if we should use a predefined fallback theme
+    const fallbackTheme = detectFallbackTheme(artSrc, info);
+
+    if (fallbackTheme) {
+      applyTheme(fallbackTheme);
+      return;
+    }
+
+    // For SVG fallback or images that can't be analyzed, use default
+    if (artSrc.endsWith('.svg')) {
+      applyTheme(fallbackThemes.default);
+      return;
+    }
+
+    // Extract colors from the actual artwork
+    const theme = await extractColorsFromImage(imgElement);
+    applyTheme(theme);
+
+  } catch (err) {
+    console.warn("Failed to extract theme colors:", err);
+    // Fallback to default theme on error
+    applyTheme(fallbackThemes.default);
+  }
+}
+
 artImg.dataset.fallback = "true";
 artImg.onerror = () => {
   if (artImg.dataset.fallback === "true") return;
   artImg.dataset.fallback = "true";
   artImg.src = fallbackArt;
+  // Apply default theme when artwork fails to load
+  applyTheme(fallbackThemes.default);
 };
 
 function currentPositionMillis() {
@@ -111,7 +392,7 @@ function updateUI(info) {
   setPlayPauseIcon(info.playback_status);
   updateScrubber(info);
   const art = pickArt(info);
-  setArtImage(art);
+  setArtImage(art, info);
   statusText.textContent = `Player: ${info.identity || info.bus_name || "auto"} | ${new Date().toLocaleTimeString()}`;
 }
 
@@ -287,10 +568,23 @@ async function loadPlayers() {
   }
 }
 
-function setArtImage(src) {
+function setArtImage(src, info) {
   const next = src || fallbackArt;
   artImg.dataset.fallback = next === fallbackArt ? "true" : "false";
-  artImg.src = next;
+
+  // Only update if the source has changed
+  if (artImg.src !== next) {
+    artImg.src = next;
+
+    // Wait for image to load before extracting colors
+    if (artImg.complete) {
+      updateThemeFromArtwork(artImg, next, info);
+    } else {
+      artImg.onload = () => {
+        updateThemeFromArtwork(artImg, next, info);
+      };
+    }
+  }
 }
 
 function stopWS() {

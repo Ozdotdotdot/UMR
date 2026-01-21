@@ -5,6 +5,15 @@
   --muted: #9aa3b5;
   --accent: #61dafb;
   --danger: #ff5f5f;
+  --primary: #61dafb;
+  --button-bg: #24304a;
+  --button-hover-bg: #2d3a56;
+  --button-border-accent: #61dafb;
+  --status-bar-bg: rgba(17, 22, 32, 0.95);
+  --status-border: #1f2533;
+
+  /* Transition duration for color changes */
+  --color-transition: 0.8s ease-in-out;
 }
 
 * { box-sizing: border-box; }
@@ -16,6 +25,7 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  transition: background-color var(--color-transition), color var(--color-transition);
 }
 
 .page {
@@ -46,14 +56,21 @@ input, select, button {
   color: var(--text);
   font-size: 16px; /* avoid iOS zoom on focus */
   touch-action: manipulation;
+  transition: background-color var(--color-transition), border-color var(--color-transition);
 }
 
 button {
   cursor: pointer;
-  border: none;
-  background: #24304a;
+  border: 2px solid transparent;
+  background: var(--button-bg);
+  color: #ffffff !important;
+  transition: background-color var(--color-transition), border-color var(--color-transition);
 }
-button:hover { background: #2d3a56; }
+button:hover {
+  background: var(--button-hover-bg);
+  border-color: var(--button-border-accent);
+  color: #ffffff !important;
+}
 
 .brand { font-weight: 700; font-size: 18px; }
 
@@ -67,6 +84,7 @@ button:hover { background: #2d3a56; }
   padding: 12px;
   border-radius: 14px;
   background: var(--card);
+  transition: background-color var(--color-transition);
 }
 .panel {
   padding: 12px;
@@ -75,6 +93,7 @@ button:hover { background: #2d3a56; }
   display: flex;
   flex-direction: column;
   gap: 8px;
+  transition: background-color var(--color-transition);
 }
 
 .scrubber {
@@ -94,6 +113,11 @@ button:hover { background: #2d3a56; }
   width: 100%;
   accent-color: var(--accent);
   align-self: center;
+}
+
+/* All range inputs use accent color */
+input[type="range"] {
+  accent-color: var(--accent);
 }
 .controls-row {
   display: flex;
@@ -118,10 +142,10 @@ button:hover { background: #2d3a56; }
   background: #000;
 }
 
-.meta .title { font-size: 18px; font-weight: 700; }
-.meta .artist { color: var(--muted); margin-top: 4px; }
-.meta .album { color: var(--muted); margin-top: 2px; }
-.meta .status { color: var(--accent); margin-top: 6px; }
+.meta .title { font-size: 18px; font-weight: 700; transition: color var(--color-transition); }
+.meta .artist { color: var(--muted); margin-top: 4px; transition: color var(--color-transition); }
+.meta .album { color: var(--muted); margin-top: 2px; transition: color var(--color-transition); }
+.meta .status { color: var(--accent); margin-top: 6px; transition: color var(--color-transition); }
 
 .controls {
   display: flex;
@@ -204,7 +228,7 @@ button:hover { background: #2d3a56; }
 .icon-play {
   border-style: solid;
   border-width: 9px 0 9px 14px;
-  border-color: transparent transparent transparent var(--text);
+  border-color: transparent transparent transparent #ffffff;
   margin-left: 2px;
 }
 .icon-pause {
@@ -217,7 +241,7 @@ button:hover { background: #2d3a56; }
   display: block;
   width: 6px;
   height: 18px;
-  background: var(--text);
+  background: #ffffff;
   border-radius: 2px;
 }
 .icon-skip-next,
@@ -302,11 +326,12 @@ button:hover { background: #2d3a56; }
 .sticky {
   margin-top: auto;
   padding: 10px 14px;
-  background: rgba(17, 22, 32, 0.95);
-  border-top: 1px solid #1f2533;
+  background: var(--status-bar-bg);
+  border-top: 1px solid var(--status-border);
   color: var(--muted);
   text-align: center;
   border-radius: 12px;
+  transition: background var(--color-transition), border-color var(--color-transition), color var(--color-transition);
 }
 
 #status-line {
