@@ -10,6 +10,8 @@ const artistEl = el("artist");
 const albumEl = el("album");
 const statusEl = el("status");
 const statusLine = el("status-line");
+const statusText = el("status-text");
+const connectionIcon = el("connection-icon");
 const positionSlider = el("position");
 const currentTimeEl = el("current-time");
 const totalTimeEl = el("total-time");
@@ -110,7 +112,7 @@ function updateUI(info) {
   updateScrubber(info);
   const art = pickArt(info);
   setArtImage(art);
-  statusLine.textContent = `Player: ${info.identity || info.bus_name || "auto"} | ${new Date().toLocaleTimeString()}`;
+  statusText.textContent = `Player: ${info.identity || info.bus_name || "auto"} | ${new Date().toLocaleTimeString()}`;
 }
 
 function pickArt(info) {
@@ -172,6 +174,25 @@ function setMuteIcon(stateMuted) {
   muteBtn.setAttribute("aria-pressed", isMuted ? "true" : "false");
 }
 
+function setConnectionIcon(connected) {
+  if (connected) {
+    connectionIcon.src = "/static/connected.svg";
+    connectionIcon.alt = "Connected";
+    connectionIcon.classList.remove("clickable");
+    connectionIcon.style.cursor = "default";
+    connectionIcon.onclick = null;
+  } else {
+    connectionIcon.src = "/static/disconnected.svg";
+    connectionIcon.alt = "Disconnected (click to reconnect)";
+    connectionIcon.classList.add("clickable");
+    connectionIcon.style.cursor = "pointer";
+    connectionIcon.onclick = () => {
+      statusText.textContent = "Reconnecting...";
+      startWS();
+    };
+  }
+}
+
 function updateScrubber(info) {
   durationMs = info.length_millis || 0;
   lastPositionMs = info.position_millis || 0;
@@ -227,7 +248,7 @@ async function syncVolume() {
       volSlider.value = Math.round(data.volume * 100);
     }
   } catch (err) {
-    statusLine.textContent = `Volume fetch failed: ${err.message}`;
+    statusText.textContent = `Volume fetch failed: ${err.message}`;
   }
 }
 
@@ -262,7 +283,7 @@ async function loadPlayers() {
       setCurrentPlayer("");
     }
   } catch (err) {
-    statusLine.textContent = `Load players failed: ${err.message}`;
+    statusText.textContent = `Load players failed: ${err.message}`;
   }
 }
 
@@ -296,28 +317,32 @@ function startWS() {
       try {
         const data = JSON.parse(evt.data);
         if (data.error) {
-          statusLine.textContent = `WS error: ${data.error}`;
+          statusText.textContent = `WS error: ${data.error}`;
           return;
         }
         updateUI(data);
       } catch (e) {
-        statusLine.textContent = `WS parse error: ${e.message}`;
+        statusText.textContent = `WS parse error: ${e.message}`;
       }
     };
     ws.onopen = () => {
       wsReady = true;
-      statusLine.textContent = "Connected (WS)";
+      statusText.textContent = "Connected (WS)";
+      setConnectionIcon(true);
     };
     ws.onclose = () => {
-      statusLine.textContent = "Disconnected";
+      statusText.textContent = "Disconnected";
+      setConnectionIcon(false);
       wsReconnectTimer = setTimeout(startWS, 1500);
     };
     ws.onerror = () => {
-      statusLine.textContent = "WS error";
+      statusText.textContent = "WS error";
+      setConnectionIcon(false);
       wsReconnectTimer = setTimeout(startWS, 1500);
     };
   } catch (err) {
-    statusLine.textContent = `WS failed: ${err.message}`;
+    statusText.textContent = `WS failed: ${err.message}`;
+    setConnectionIcon(false);
   }
 }
 
@@ -332,7 +357,7 @@ async function foregroundRefresh() {
     await syncVolume();
     startWS();
   } catch (err) {
-    statusLine.textContent = `Refresh failed: ${err.message}`;
+    statusText.textContent = `Refresh failed: ${err.message}`;
   } finally {
     foregroundRefreshInFlight = false;
   }
@@ -352,7 +377,7 @@ async function bindControls() {
     try {
       await postJSON("/player/playpause", {}, playerParam());
     } catch (err) {
-      statusLine.textContent = `Play/pause failed: ${err.message}`;
+      statusText.textContent = `Play/pause failed: ${err.message}`;
     }
   };
   replay10Btn.onclick = async () => {
@@ -360,21 +385,21 @@ async function bindControls() {
       await postJSON("/player/seek", { delta_ms: -10000 }, playerParam());
       applyLocalSeek(-10000);
     } catch (err) {
-      statusLine.textContent = `Replay 10 failed: ${err.message}`;
+      statusText.textContent = `Replay 10 failed: ${err.message}`;
     }
   };
   prevBtn.onclick = async () => {
     try {
       await postJSON("/player/prev", {}, playerParam());
     } catch (err) {
-      statusLine.textContent = `Prev failed: ${err.message}`;
+      statusText.textContent = `Prev failed: ${err.message}`;
     }
   };
   nextBtn.onclick = async () => {
     try {
       await postJSON("/player/next", {}, playerParam());
     } catch (err) {
-      statusLine.textContent = `Next failed: ${err.message}`;
+      statusText.textContent = `Next failed: ${err.message}`;
     }
   };
   forward10Btn.onclick = async () => {
@@ -382,7 +407,7 @@ async function bindControls() {
       await postJSON("/player/seek", { delta_ms: 10000 }, playerParam());
       applyLocalSeek(10000);
     } catch (err) {
-      statusLine.textContent = `Forward 10 failed: ${err.message}`;
+      statusText.textContent = `Forward 10 failed: ${err.message}`;
     }
   };
   positionSlider.addEventListener("input", (e) => {
@@ -401,7 +426,7 @@ async function bindControls() {
       lastPositionMs = val;
       lastUpdateTs = performance.now();
     } catch (err) {
-      statusLine.textContent = `Seek failed: ${err.message}`;
+      statusText.textContent = `Seek failed: ${err.message}`;
     }
   });
   volDownBtn.onclick = () => adjustVolume(-0.05);
@@ -412,7 +437,7 @@ async function bindControls() {
       await postJSON("/volume", { mute: nextMuted });
       setMuteIcon(nextMuted);
     } catch (err) {
-      statusLine.textContent = `Mute failed: ${err.message}`;
+      statusText.textContent = `Mute failed: ${err.message}`;
     }
   };
   volSlider.oninput = async (e) => {
@@ -420,7 +445,7 @@ async function bindControls() {
     try {
       await postJSON("/volume", { absolute: value });
     } catch (err) {
-      statusLine.textContent = `Volume set failed: ${err.message}`;
+      statusText.textContent = `Volume set failed: ${err.message}`;
     }
   };
 }
@@ -429,7 +454,7 @@ async function adjustVolume(delta) {
   try {
     await postJSON("/volume", { delta });
   } catch (err) {
-    statusLine.textContent = `Volume adjust failed: ${err.message}`;
+    statusText.textContent = `Volume adjust failed: ${err.message}`;
   }
 }
 
@@ -438,12 +463,13 @@ async function loadNowPlaying() {
     const info = await fetchJSON("/nowplaying", playerParam());
     updateUI(info);
   } catch (err) {
-    statusLine.textContent = `Now playing fetch failed: ${err.message}`;
+    statusText.textContent = `Now playing fetch failed: ${err.message}`;
   }
 }
 
 async function init() {
   loadPrefs();
+  setConnectionIcon(false); // Start with disconnected state
   await bindControls();
   connectBtn.onclick = async () => {
     savePrefs();
@@ -465,4 +491,4 @@ async function init() {
   requestAnimationFrame(tick);
 }
 
-init().catch((err) => (statusLine.textContent = err.message));
+init().catch((err) => (statusText.textContent = err.message));

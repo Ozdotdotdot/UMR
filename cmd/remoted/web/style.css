@@ -309,6 +309,31 @@ button:hover { background: #2d3a56; }
   border-radius: 12px;
 }
 
+#status-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.connection-icon {
+  width: 24px;
+  height: 24px;
+  opacity: 0.7;
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.connection-icon.clickable {
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.connection-icon.clickable:hover {
+  opacity: 1;
+}
+
 @media (max-width: 640px) {
   .card {
     grid-template-columns: 1fr;
