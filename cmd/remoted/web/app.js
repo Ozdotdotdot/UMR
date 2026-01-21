@@ -115,6 +115,12 @@ function updateUI(info) {
 
 function pickArt(info) {
   if (isNetflix(info)) return "/static/netflix_icon.svg";
+  if (isCrunchyroll(info)) {
+    // If backend found TMDb artwork, use it; otherwise fallback to Crunchyroll icon
+    if (info.art_url_proxy) return info.art_url_proxy;
+    if (info.art_url) return info.art_url;
+    return "/static/crunchyroll_icon.svg";
+  }
   const thumb = youtubeThumbFromURL(info.url || "");
   if (thumb) return thumb;
   if (info.art_url_proxy) return info.art_url_proxy;
@@ -126,6 +132,11 @@ function isNetflix(info) {
   const t = (info.title || "").toLowerCase();
   const id = (info.identity || "").toLowerCase();
   return t === "netflix" || id === "netflix";
+}
+
+function isCrunchyroll(info) {
+  const t = (info.title || "").toLowerCase();
+  return t.endsWith(" - watch on crunchyroll");
 }
 
 function youtubeThumbFromURL(url) {

@@ -846,6 +846,27 @@ func fetchPlayerInfo(ctx context.Context, conn *dbus.Conn, busName string) (play
 		}
 	}
 
+	// For Crunchyroll, override any existing artwork with TMDb lookup if possible.
+	// Chromium often provides low-quality temp file artwork, so we prefer TMDb.
+	// Falls back to Crunchyroll icon in frontend if parsing fails or TMDb returns nothing.
+	if tmdbKey != "" && isCrunchyroll(info) {
+		if parsedTitle := parseCrunchyrollTitle(info.Title); parsedTitle != "" {
+			if art := tmdbLookup(ctx, parsedTitle); art != "" {
+				info.ArtURL = art
+				info.ArtURLProxy = ""
+				info.ArtHint = "tmdb"
+			} else {
+				// Parsing succeeded but TMDb lookup failed - clear artwork to show Crunchyroll icon
+				info.ArtURL = ""
+				info.ArtURLProxy = ""
+			}
+		} else {
+			// Parsing failed (e.g., "Season 1..." or arc title) - clear artwork to show Crunchyroll icon
+			info.ArtURL = ""
+			info.ArtURLProxy = ""
+		}
+	}
+
 	return info, nil
 }
 
@@ -1368,6 +1389,93 @@ func isHBO(info playerInfo) bool {
 	}
 	id := strings.ToLower(info.Identity)
 	return strings.Contains(id, "hbo") || strings.Contains(id, "max")
+}
+
+func isCrunchyroll(info playerInfo) bool {
+	titleLower := strings.ToLower(info.Title)
+	return strings.HasSuffix(titleLower, " - watch on crunchyroll")
+}
+
+// parseCrunchyrollTitle attempts to extract the show name from Crunchyroll's title format.
+// Returns empty string if title starts with "Season" (no useful show name) or if parsing fails.
+func parseCrunchyrollTitle(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+
+	// Remove the " - Watch on Crunchyroll" suffix (case-insensitive)
+	lowerTitle := strings.ToLower(title)
+	suffix := " - watch on crunchyroll"
+	if strings.HasSuffix(lowerTitle, suffix) {
+		title = title[:len(title)-len(suffix)]
+	}
+
+	title = strings.TrimSpace(title)
+
+	// If it starts with "Season", we know there's no useful title
+	if strings.HasPrefix(title, "Season ") {
+		return ""
+	}
+
+	// Common patterns in Crunchyroll titles:
+	// 1. "ShowName (English Dub) Episode Title"
+	// 2. "ShowName Season N Episode Title"
+	// 3. "ARC (numbers) Episode Title"
+
+	// Strategy: Take everything before common episode indicators
+	// Look for patterns like: "(English Dub)", "Season N", or episode numbers/names
+
+	// First, try to find parenthetical content like "(English Dub)" or arc numbers "(892-1088)"
+	if idx := strings.Index(title, " ("); idx > 0 {
+		beforeParen := strings.TrimSpace(title[:idx])
+		insideParen := ""
+		if endIdx := strings.Index(title[idx:], ")"); endIdx > 0 {
+			insideParen = title[idx+2 : idx+endIdx]
+		}
+
+		// Check if inside parentheses looks like arc numbers (contains digits and dashes)
+		// If so, this is probably not the show name
+		hasDigits := false
+		for _, r := range insideParen {
+			if unicode.IsDigit(r) {
+				hasDigits = true
+				break
+			}
+		}
+
+		// If parentheses contain "Dub" or "Sub", the part before is likely the show name
+		if strings.Contains(strings.ToLower(insideParen), "dub") || strings.Contains(strings.ToLower(insideParen), "sub") {
+			if beforeParen != "" {
+				return beforeParen
+			}
+		}
+
+		// If parentheses contain numbers/dashes (like arc numbers), skip the whole thing
+		// and continue parsing what comes after
+		if hasDigits && strings.Contains(insideParen, "-") {
+			// This is likely an arc indicator like "WANO KUNI (892-1088)"
+			// In this case, we can't reliably extract show name, return empty
+			return ""
+		}
+	}
+
+	// Look for " Season " pattern
+	if idx := strings.Index(title, " Season "); idx > 0 {
+		showName := strings.TrimSpace(title[:idx])
+		if showName != "" {
+			return showName
+		}
+	}
+
+	// If we found nothing specific, take the first few words (max 4) as a heuristic
+	// This handles cases where the format is unexpected
+	words := strings.Fields(title)
+	if len(words) > 4 {
+		return strings.Join(words[:4], " ")
+	}
+
+	return title
 }
 
 func tmdbLookup(ctx context.Context, title string) string {
