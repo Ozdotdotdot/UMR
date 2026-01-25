@@ -8,6 +8,7 @@ Go daemon + web UI for remote media control on Linux (MPRIS playback + PipeWire/
 ## Features
 - Auto player selection with manual override; WebSocket push updates (no polling).
 - Play/pause, next/prev, ±10s seek, arbitrary seek via scrubber, volume set/delta/mute.
+- Artwork-driven theming: background, controls, and service icons adapt to dominant colors in the current artwork; falls back to service-themed icons when art is missing.
 - Artwork proxying for local `file://` art (under `/tmp`/`/var/tmp`). Optional Chromium helper extension can send the active tab URL to remoted for higher-quality art (YouTube thumbnails, TMDb lookups); Firefox already exposes URLs via MPRIS.
 - HTTP API + browser UI (`/ui`).
 - Progressive Web App enabled for mobile interfaces. Can now "add to homescreen" on iOS for easy and native-feeling access.
@@ -63,7 +64,18 @@ curl http://127.0.0.1:8080/healthz
 
 ## Optional add-ons
 - Chromium URL helper: Chromium doesn’t expose tab URLs over MPRIS. A tiny local extension can POST the active media tab URL to `http://127.0.0.1:8080/player/url` (with your token) so YouTube thumbnails and TMDb lookups work in Chromium. Load the helper as an unpacked extension (Developer Mode in `chrome://extensions`); Firefox already exposes URLs and doesn’t need this.
-- TMDb fallback art: set `REMOTED_TMDB_KEY` (or `-tmdb-key`) to enable TMDb lookups for HBO/Max sessions that lack artwork. Uses a quick search (prefers exact title match, else most popular TV/movie with a poster), cached ~12h, w342 poster size, 2s timeout. Requires a TMDb account and an API (free)
+- TMDb fallback art: set `REMOTED_TMDB_KEY` (or `-tmdb-key`) to enable TMDb lookups for HBO/Max sessions that lack artwork. Uses a quick search (prefers exact title match, else most popular TV/movie with a poster), cached ~12h, w342 poster size, 2s timeout. Requires a TMDb account and an API (free). Also used for Crunchyroll sessions when the show title can be parsed from the player window title; if parsing fails, the UI falls back to a Crunchyroll-themed icon.
+
+## Streaming artwork support
+- Netflix: falls back to a Netflix-themed icon when artwork is missing; colors adapt to the service palette or extracted art.
+- HBO/Max: TMDb lookup fills in artwork when the player provides none (requires `REMOTED_TMDB_KEY`).
+- Crunchyroll: attempts TMDb art pulls when the show name can be extracted from the title; coverage depends on how the title is formatted. Otherwise shows a Crunchyroll icon.
+
+## Supported video services (art + theming)
+- Netflix
+- HBO / Max
+- Crunchyroll (partial: depends on title formatting)
+- Generic players inherit artwork-driven theming when art is available.
 
 ## API
 See `docs/API.md` for endpoints, auth, and examples (players, nowplaying, playback controls, seek, volume, art proxy).
