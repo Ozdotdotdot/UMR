@@ -31,6 +31,21 @@ Release tarballs include ready-to-run binaries:
 - `remoted-linux-amd64.tar.gz`
 - `remoted-linux-arm64.tar.gz`
 
+Quick install (no Go required):
+```bash
+curl -fsSL https://raw.githubusercontent.com/ozdotdotdot/UMR/main/scripts/install.sh | bash
+```
+This installs `remoted` to `~/.local/bin` by default.
+
+Optional arguments/env:
+```bash
+# specific release tag
+curl -fsSL https://raw.githubusercontent.com/ozdotdotdot/UMR/main/scripts/install.sh | bash -s -- v0.1.0
+
+# custom install directory
+curl -fsSL https://raw.githubusercontent.com/ozdotdotdot/UMR/main/scripts/install.sh | INSTALL_DIR=/usr/local/bin bash
+```
+
 Download and unpack:
 ```bash
 tar -xf remoted-linux-amd64.tar.gz
