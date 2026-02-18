@@ -811,7 +811,7 @@ func listPlayers(ctx context.Context) ([]playerInfo, error) {
 		players = append(players, info)
 	}
 	if mpdAddr != "" {
-		if mpdInfo, err := fetchMPDInfo(); err != nil {
+		if mpdInfo, err := fetchMPDInfo(ctx); err != nil {
 			log.Printf("warn: mpd unavailable: %v", err)
 		} else {
 			players = append(players, mpdInfo)
@@ -996,7 +996,7 @@ func markActive(players []playerInfo) []playerInfo {
 
 // fetchMPDInfo connects to MPD, queries its current state, and returns a
 // playerInfo with BusName "mpd". Returns an error if MPD is unreachable.
-func fetchMPDInfo() (playerInfo, error) {
+func fetchMPDInfo(ctx context.Context) (playerInfo, error) {
 	c, err := mpd.Dial("tcp", mpdAddr)
 	if err != nil {
 		return playerInfo{}, fmt.Errorf("mpd dial: %w", err)
@@ -1011,7 +1011,27 @@ func fetchMPDInfo() (playerInfo, error) {
 	if err != nil {
 		return playerInfo{}, fmt.Errorf("mpd currentsong: %w", err)
 	}
-	return mpdToPlayerInfo(status, song), nil
+	info := mpdToPlayerInfo(status, song)
+
+	// Art: try embedded art via readpicture first.
+	if songURI := song["file"]; songURI != "" {
+		if data, err := c.ReadPicture(songURI); err == nil && len(data) > 0 {
+			if proxy, err := cacheMPDPicture(data, songURI); err == nil {
+				info.ArtURLProxy = proxy
+			} else {
+				log.Printf("warn: mpd cache picture: %v", err)
+			}
+		}
+	}
+	// Art: fall back to MusicBrainz if no embedded art found.
+	if info.ArtURLProxy == "" && info.Artist != "" && info.Album != "" {
+		if artURL := musicBrainzArtURL(ctx, info.Artist, info.Album); artURL != "" {
+			info.ArtURL = artURL
+			info.ArtHint = "musicbrainz"
+		}
+	}
+
+	return info, nil
 }
 
 // mpdToPlayerInfo maps MPD status and currentsong attributes to a playerInfo.
@@ -1153,6 +1173,111 @@ func runMPDWatcher(ctx context.Context, hub *wsHub) error {
 			hub.requestBroadcast()
 		}
 	}
+}
+
+// mimeToExt maps an image MIME type to a file extension.
+func mimeToExt(mimeType string) string {
+	switch strings.ToLower(strings.SplitN(mimeType, ";", 2)[0]) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ".img"
+	}
+}
+
+// cacheMPDPicture writes raw image bytes to artCacheDir and returns the /art/ proxy path.
+// The cache key is SHA1 of "mpd:"+songURI so the same song is never re-fetched.
+func cacheMPDPicture(data []byte, songURI string) (string, error) {
+	mimeType := http.DetectContentType(data)
+	ext := mimeToExt(mimeType)
+
+	h := sha1.New()
+	io.WriteString(h, "mpd:"+songURI)
+	cacheName := fmt.Sprintf("%x", h.Sum(nil)) + ext
+	dest := filepath.Join(artCacheDir, cacheName)
+
+	// Already cached — no need to re-write.
+	if _, err := os.Stat(dest); err == nil {
+		return "/art/" + cacheName, nil
+	}
+
+	// Atomic write via temp file.
+	tmp := dest + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	return "/art/" + cacheName, nil
+}
+
+var mbArtCache = struct {
+	mu    sync.RWMutex
+	store map[string]tmdbCacheEntry
+}{store: make(map[string]tmdbCacheEntry)}
+
+// musicBrainzArtURL returns a Cover Art Archive image URL for the given artist
+// and album. Results are cached for 12 hours. Returns "" if not found.
+func musicBrainzArtURL(ctx context.Context, artist, album string) string {
+	key := strings.ToLower(artist + "|" + album)
+	now := time.Now()
+
+	mbArtCache.mu.RLock()
+	if e, ok := mbArtCache.store[key]; ok && now.Sub(e.StoredAt) < 12*time.Hour {
+		mbArtCache.mu.RUnlock()
+		return e.URL
+	}
+	mbArtCache.mu.RUnlock()
+
+	artURL := fetchMusicBrainzArt(ctx, artist, album)
+
+	mbArtCache.mu.Lock()
+	mbArtCache.store[key] = tmdbCacheEntry{URL: artURL, StoredAt: now, Errored: artURL == ""}
+	mbArtCache.mu.Unlock()
+	return artURL
+}
+
+// fetchMusicBrainzArt queries the MusicBrainz API for a release matching the
+// given artist and album, then returns a Cover Art Archive front image URL.
+func fetchMusicBrainzArt(ctx context.Context, artist, album string) string {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	query := url.QueryEscape(fmt.Sprintf(`artist:"%s" AND release:"%s"`, artist, album))
+	apiURL := "https://musicbrainz.org/ws/2/release/?query=" + query + "&fmt=json&limit=5"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("User-Agent", "UMR-remoted/1.0 (github.com/ozdotdotdot/UMR)")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Releases []struct {
+			ID    string `json:"id"`
+			Score int    `json:"score"`
+		} `json:"releases"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || len(result.Releases) == 0 {
+		return ""
+	}
+
+	mbid := result.Releases[0].ID
+	return fmt.Sprintf("https://coverartarchive.org/release/%s/front-500", mbid)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
