@@ -10,6 +10,7 @@ Go daemon + web UI for remote media control on Linux (MPRIS playback + PipeWire/
 - Play/pause, next/prev, ±10s seek, arbitrary seek via scrubber, volume set/delta/mute.
 - Artwork-driven theming: background, controls, and service icons adapt to dominant colors in the current artwork; falls back to service-themed icons when art is missing.
 - Artwork proxying for local `file://` art (under `/tmp`/`/var/tmp`). Optional Chromium helper extension can send the active tab URL to remoted for higher-quality art (YouTube thumbnails, TMDb lookups); Firefox already exposes URLs via MPRIS.
+- **MPD (Music Player Daemon) support**: opt-in via `REMOTED_MPD_ADDR`. Surfaces as a first-class player alongside MPRIS players — full transport control, real-time idle-based updates, and album art via `readpicture` (embedded tags) with a free MusicBrainz Cover Art Archive fallback.
 - HTTP API + browser UI (`/ui`).
 - Progressive Web App enabled for mobile interfaces. Can now "add to homescreen" on iOS for easy and native-feeling access.
 
@@ -59,6 +60,7 @@ You can configure with env vars or flags (flags override env defaults):
 - `REMOTED_TOKEN` / `-token` — bearer token (required for everything except `/healthz` when set)
 - `REMOTED_ART_CACHE` / `-art-cache` — art cache dir (default `~/.cache/umr/art` or `/tmp/umr/art`)
 - `REMOTED_TMDB_KEY` / `-tmdb-key` — optional TMDb API key; enables fallback art for HBO/Max titles
+- `REMOTED_MPD_ADDR` / `-mpd` — optional MPD address (e.g. `localhost:6600`); enables MPD player support
 - `-version` (string) or `-v` (print version and exit)
 
 Examples:
@@ -68,6 +70,9 @@ REMOTED_TOKEN="choose-a-secret" remoted
 
 # LAN access (flag)
 remoted -bind=0.0.0.0 -token=choose-a-secret
+
+# With MPD support
+REMOTED_MPD_ADDR=localhost:6600 remoted
 ```
 
 Visit the UI at `http://<host>:<port>/ui` (enter your token if set). WebSocket updates keep the page live; transport and volume controls call the API.
@@ -78,8 +83,9 @@ curl http://127.0.0.1:8080/healthz
 ```
 
 ## Optional add-ons
-- Chromium URL helper: Chromium doesn’t expose tab URLs over MPRIS. A tiny local extension can POST the active media tab URL to `http://127.0.0.1:8080/player/url` (with your token) so YouTube thumbnails and TMDb lookups work in Chromium. Load the helper as an unpacked extension (Developer Mode in `chrome://extensions`); Firefox already exposes URLs and doesn’t need this.
+- Chromium URL helper: Chromium doesn't expose tab URLs over MPRIS. A tiny local extension can POST the active media tab URL to `http://127.0.0.1:8080/player/url` (with your token) so YouTube thumbnails and TMDb lookups work in Chromium. Load the helper as an unpacked extension (Developer Mode in `chrome://extensions`); Firefox already exposes URLs and doesn't need this.
 - TMDb fallback art: set `REMOTED_TMDB_KEY` (or `-tmdb-key`) to enable TMDb lookups for HBO/Max sessions that lack artwork. Uses a quick search (prefers exact title match, else most popular TV/movie with a poster), cached ~12h, w342 poster size, 2s timeout. Requires a TMDb account and an API (free). Also used for Crunchyroll sessions when the show title can be parsed from the player window title; if parsing fails, the UI falls back to a Crunchyroll-themed icon.
+- MPD support: set `REMOTED_MPD_ADDR=localhost:6600` (or `-mpd`) to enable. MPD appears alongside MPRIS players with full transport control and real-time updates via MPD's idle protocol. Album art is fetched via MPD's `readpicture` command (requires embedded tags in your files; MPD ≥ 0.22). If no embedded art is found, remoted falls back to the [MusicBrainz Cover Art Archive](https://coverartarchive.org/) — free, no API key required — using the artist and album name; results are cached for 12 hours.
 
 ## Streaming artwork support
 - Netflix: falls back to a Netflix-themed icon when artwork is missing; colors adapt to the service palette or extracted art.
