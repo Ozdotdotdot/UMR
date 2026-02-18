@@ -7,4 +7,7 @@ require (
 	nhooyr.io/websocket v1.8.17
 )
 
-require golang.org/x/sys v0.27.0 // indirect
+require (
+	github.com/fhs/gompd/v2 v2.3.0 // indirect
+	golang.org/x/sys v0.27.0 // indirect
+)

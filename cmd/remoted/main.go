@@ -25,6 +25,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/fhs/gompd/v2/mpd"
 	"github.com/godbus/dbus/v5"
 	"nhooyr.io/websocket"
 )
@@ -47,6 +48,7 @@ var (
 var (
 	artCacheDir string
 	tmdbKey     string
+	mpdAddr     string
 )
 
 type tmdbCacheEntry struct {
@@ -75,6 +77,7 @@ type Config struct {
 	Version      string
 	ArtCache     string
 	TMDBKey      string
+	MPDAddr      string
 	PrintVersion bool
 }
 
@@ -159,6 +162,7 @@ func main() {
 	}
 	artCacheDir = cfg.ArtCache
 	tmdbKey = strings.TrimSpace(cfg.TMDBKey)
+	mpdAddr = strings.TrimSpace(cfg.MPDAddr)
 	if err := os.MkdirAll(artCacheDir, 0o755); err != nil {
 		log.Fatalf("failed to create art cache dir: %v", err)
 	}
@@ -201,6 +205,10 @@ func main() {
 
 	go hub.run(ctx)
 	go startSignalListener(ctx, hub)
+	if mpdAddr != "" {
+		go startMPDListener(ctx, hub)
+		log.Printf("mpd support enabled: %s", mpdAddr)
+	}
 
 	go func() {
 		log.Printf("remoted %s listening on %s:%d (token set: %t)", cfg.Version, cfg.BindAddr, cfg.Port, cfg.Token != "")
@@ -238,6 +246,7 @@ func parseConfig() Config {
 	flag.StringVar(&cfg.Version, "version", envVersion, "version string to report (default from REMOTED_VERSION)")
 	flag.StringVar(&cfg.ArtCache, "art-cache", defaultArt, "artwork cache directory (default from REMOTED_ART_CACHE)")
 	flag.StringVar(&cfg.TMDBKey, "tmdb-key", defaultTMDB, "TMDb API key (default from REMOTED_TMDB_KEY)")
+	flag.StringVar(&cfg.MPDAddr, "mpd", os.Getenv("REMOTED_MPD_ADDR"), "MPD address host:port (default from REMOTED_MPD_ADDR; empty = disabled)")
 	flag.BoolVar(&cfg.PrintVersion, "v", false, "print version and exit")
 
 	flag.Usage = func() {
@@ -533,6 +542,23 @@ func playPauseHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if info.BusName == "mpd" {
+		if err := mpdPlayPause(info.PlaybackStatus); err != nil {
+			http.Error(w, fmt.Sprintf("mpd play/pause: %v", err), http.StatusInternalServerError)
+			return
+		}
+		setLastPlayer("mpd")
+		if globalHub != nil {
+			globalHub.requestBroadcast()
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"player": info.Identity,
+			"action": "toggle",
+			"status": "ok",
+		})
+		return
+	}
+
 	method := "org.mpris.MediaPlayer2.Player.Play"
 	action := "play"
 	if strings.EqualFold(info.PlaybackStatus, "Playing") {
@@ -581,6 +607,27 @@ func controlHandler(w http.ResponseWriter, r *http.Request, method string) {
 		return
 	}
 
+	if info.BusName == "mpd" {
+		cmd := "next"
+		if strings.HasSuffix(method, ".Previous") {
+			cmd = "previous"
+		}
+		if err := mpdControl(cmd); err != nil {
+			http.Error(w, fmt.Sprintf("mpd %s: %v", cmd, err), http.StatusInternalServerError)
+			return
+		}
+		setLastPlayer("mpd")
+		if globalHub != nil {
+			globalHub.requestBroadcast()
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"player": info.Identity,
+			"action": cmd,
+			"status": "ok",
+		})
+		return
+	}
+
 	if err := callPlayerMethod(ctx, info.BusName, method); err != nil {
 		http.Error(w, fmt.Sprintf("call %s: %v", method, err), http.StatusInternalServerError)
 		return
@@ -626,6 +673,33 @@ func seekHandler(w http.ResponseWriter, r *http.Request) {
 	info, err := pickPlayer(ctx, target)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("select player: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if info.BusName == "mpd" {
+		switch {
+		case req.TargetMillis != nil:
+			if err := mpdSeek(*req.TargetMillis, false); err != nil {
+				http.Error(w, fmt.Sprintf("mpd seek absolute: %v", err), http.StatusInternalServerError)
+				return
+			}
+		case req.DeltaMillis != nil:
+			if err := mpdSeek(*req.DeltaMillis, true); err != nil {
+				http.Error(w, fmt.Sprintf("mpd seek relative: %v", err), http.StatusInternalServerError)
+				return
+			}
+		}
+		setLastPlayer("mpd")
+		if globalHub != nil {
+			globalHub.requestBroadcast()
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"player": info.Identity,
+			"action": "seek",
+			"delta":  req.DeltaMillis,
+			"target": req.TargetMillis,
+			"status": "ok",
+		})
 		return
 	}
 
@@ -736,6 +810,14 @@ func listPlayers(ctx context.Context) ([]playerInfo, error) {
 		}
 		players = append(players, info)
 	}
+	if mpdAddr != "" {
+		if mpdInfo, err := fetchMPDInfo(); err != nil {
+			log.Printf("warn: mpd unavailable: %v", err)
+		} else {
+			players = append(players, mpdInfo)
+		}
+	}
+
 	players = markActive(players)
 	return players, nil
 }
@@ -909,6 +991,171 @@ func markActive(players []playerInfo) []playerInfo {
 	}
 	return players
 }
+
+// ── MPD support ──────────────────────────────────────────────────────────────
+
+// fetchMPDInfo connects to MPD, queries its current state, and returns a
+// playerInfo with BusName "mpd". Returns an error if MPD is unreachable.
+func fetchMPDInfo() (playerInfo, error) {
+	c, err := mpd.Dial("tcp", mpdAddr)
+	if err != nil {
+		return playerInfo{}, fmt.Errorf("mpd dial: %w", err)
+	}
+	defer c.Close()
+
+	status, err := c.Status()
+	if err != nil {
+		return playerInfo{}, fmt.Errorf("mpd status: %w", err)
+	}
+	song, err := c.CurrentSong()
+	if err != nil {
+		return playerInfo{}, fmt.Errorf("mpd currentsong: %w", err)
+	}
+	return mpdToPlayerInfo(status, song), nil
+}
+
+// mpdToPlayerInfo maps MPD status and currentsong attributes to a playerInfo.
+func mpdToPlayerInfo(status, song mpd.Attrs) playerInfo {
+	info := playerInfo{
+		BusName:    "mpd",
+		Identity:   "MPD",
+		CanControl: true,
+	}
+
+	switch status["state"] {
+	case "play":
+		info.PlaybackStatus = "Playing"
+	case "pause":
+		info.PlaybackStatus = "Paused"
+	default:
+		info.PlaybackStatus = "Stopped"
+	}
+
+	info.Title = song["Title"]
+	info.Artist = song["Artist"]
+	info.Album = song["Album"]
+	info.URL = song["file"]
+	info.TrackID = status["songid"]
+
+	if elapsedStr, ok := status["elapsed"]; ok {
+		if elapsed, err := strconv.ParseFloat(elapsedStr, 64); err == nil {
+			info.PositionMillis = int64(elapsed * 1000)
+		}
+	}
+	if durStr, ok := status["duration"]; ok {
+		if dur, err := strconv.ParseFloat(durStr, 64); err == nil {
+			info.LengthMillis = int64(dur * 1000)
+		}
+	}
+	if info.LengthMillis == 0 {
+		if durStr, ok := song["Duration"]; ok {
+			if dur, err := strconv.ParseFloat(durStr, 64); err == nil {
+				info.LengthMillis = int64(dur * 1000)
+			}
+		}
+	}
+
+	return info
+}
+
+// mpdPlayPause toggles MPD playback based on the current state.
+func mpdPlayPause(currentStatus string) error {
+	c, err := mpd.Dial("tcp", mpdAddr)
+	if err != nil {
+		return fmt.Errorf("mpd dial: %w", err)
+	}
+	defer c.Close()
+
+	switch currentStatus {
+	case "Playing":
+		return c.Pause(true)
+	case "Paused":
+		return c.Pause(false)
+	default:
+		return c.Play(-1)
+	}
+}
+
+// mpdControl sends a next or previous command to MPD.
+func mpdControl(command string) error {
+	c, err := mpd.Dial("tcp", mpdAddr)
+	if err != nil {
+		return fmt.Errorf("mpd dial: %w", err)
+	}
+	defer c.Close()
+
+	switch command {
+	case "next":
+		return c.Next()
+	case "previous":
+		return c.Previous()
+	default:
+		return fmt.Errorf("unknown mpd command: %q", command)
+	}
+}
+
+// mpdSeek seeks in the current MPD song.
+// If relative is true, millis is an offset from the current position.
+// If relative is false, millis is an absolute position from the start.
+func mpdSeek(millis int64, relative bool) error {
+	c, err := mpd.Dial("tcp", mpdAddr)
+	if err != nil {
+		return fmt.Errorf("mpd dial: %w", err)
+	}
+	defer c.Close()
+
+	d := time.Duration(millis) * time.Millisecond
+	return c.SeekCur(d, relative)
+}
+
+// startMPDListener watches for MPD player events and triggers WebSocket
+// broadcasts. Reconnects automatically with a 10-second backoff.
+func startMPDListener(ctx context.Context, hub *wsHub) {
+	for {
+		if err := runMPDWatcher(ctx, hub); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("mpd watcher: %v; reconnecting in 10s", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
+		} else {
+			return // context cancelled
+		}
+	}
+}
+
+// runMPDWatcher creates one MPD idle subscription and runs until error or
+// context cancellation.
+func runMPDWatcher(ctx context.Context, hub *wsHub) error {
+	w, err := mpd.NewWatcher("tcp", mpdAddr, "", "player")
+	if err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	defer w.Close()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case err, ok := <-w.Error:
+			if !ok {
+				return fmt.Errorf("watcher error channel closed")
+			}
+			return fmt.Errorf("watcher: %w", err)
+		case _, ok := <-w.Event:
+			if !ok {
+				return fmt.Errorf("watcher event channel closed")
+			}
+			hub.requestBroadcast()
+		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 func listNames(ctx context.Context, conn *dbus.Conn) ([]string, error) {
 	obj := conn.Object("org.freedesktop.DBus", "/org/freedesktop/DBus")
