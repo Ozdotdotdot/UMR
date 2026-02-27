@@ -26,7 +26,12 @@ const volUpBtn = el("vol-up");
 const muteBtn = el("mute");
 const muteIcon = el("mute-icon");
 const volSlider = el("volume");
+const hapticLabel = el("haptic-label");
 const fallbackArt = "/static/noartworkfound.svg";
+
+function haptic() {
+  if (hapticLabel) hapticLabel.click();
+}
 
 let ws;
 let wsReconnectTimer;
@@ -668,6 +673,7 @@ function playerParam() {
 
 async function bindControls() {
   playPauseBtn.onclick = async () => {
+    haptic();
     try {
       await postJSON("/player/playpause", {}, playerParam());
     } catch (err) {
@@ -675,6 +681,7 @@ async function bindControls() {
     }
   };
   replay10Btn.onclick = async () => {
+    haptic();
     try {
       await postJSON("/player/seek", { delta_ms: -10000 }, playerParam());
       applyLocalSeek(-10000);
@@ -683,6 +690,7 @@ async function bindControls() {
     }
   };
   prevBtn.onclick = async () => {
+    haptic();
     try {
       await postJSON("/player/prev", {}, playerParam());
     } catch (err) {
@@ -690,6 +698,7 @@ async function bindControls() {
     }
   };
   nextBtn.onclick = async () => {
+    haptic();
     try {
       await postJSON("/player/next", {}, playerParam());
     } catch (err) {
@@ -697,6 +706,7 @@ async function bindControls() {
     }
   };
   forward10Btn.onclick = async () => {
+    haptic();
     try {
       await postJSON("/player/seek", { delta_ms: 10000 }, playerParam());
       applyLocalSeek(10000);
@@ -710,6 +720,7 @@ async function bindControls() {
     renderTime(val, durationMs);
   });
   positionSlider.addEventListener("change", async (e) => {
+    haptic();
     const val = parseInt(e.target.value, 10) || 0;
     const currentPos = currentPositionMillis();
     const delta = val - currentPos;
@@ -723,9 +734,10 @@ async function bindControls() {
       statusText.textContent = `Seek failed: ${err.message}`;
     }
   });
-  volDownBtn.onclick = () => adjustVolume(-0.05);
-  volUpBtn.onclick = () => adjustVolume(0.05);
+  volDownBtn.onclick = () => { haptic(); adjustVolume(-0.05); };
+  volUpBtn.onclick = () => { haptic(); adjustVolume(0.05); };
   muteBtn.onclick = async () => {
+    haptic();
     const nextMuted = !isMuted;
     try {
       await postJSON("/volume", { mute: nextMuted });
@@ -735,6 +747,7 @@ async function bindControls() {
     }
   };
   volSlider.oninput = async (e) => {
+    haptic();
     const value = parseInt(e.target.value, 10) / 100;
     try {
       await postJSON("/volume", { absolute: value });
