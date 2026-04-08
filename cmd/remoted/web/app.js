@@ -5,7 +5,6 @@ const connectBtn    = el("connect");
 const refreshBtn    = el("refresh");
 const playerSelect  = el("player");
 const artImg        = el("art");
-const artPlaceholder = el("art-placeholder");
 const bgArt         = el("bg-art");
 const titleEl       = el("title");
 const artistEl      = el("artist");
@@ -21,7 +20,7 @@ const nextBtn       = el("next");
 const forward10Btn  = el("forward10");
 const volSlider     = el("volume");
 const hapticLabel   = el("haptic-label");
-const fallbackArt   = "";
+const fallbackArt   = "/static/noartworkfound.svg";
 
 function haptic() {
   if (hapticLabel) hapticLabel.click();
@@ -60,25 +59,14 @@ function setArtImage(src) {
   const next = src || fallbackArt;
   if (artImg.dataset.current === next) return;
   artImg.dataset.current = next;
-
-  if (next) {
-    artImg.src = next;
-    artImg.style.display = "block";
-    artPlaceholder.style.display = "none";
-    bgArt.style.backgroundImage = `url(${next})`;
-  } else {
-    artImg.src = "";
-    artImg.style.display = "none";
-    artPlaceholder.style.display = "flex";
-    bgArt.style.backgroundImage = "";
-  }
+  artImg.src = next;
+  bgArt.style.backgroundImage = next !== fallbackArt ? `url(${next})` : "";
 }
 
 artImg.onerror = () => {
-  artImg.style.display = "none";
-  artPlaceholder.style.display = "flex";
+  artImg.src = fallbackArt;
   bgArt.style.backgroundImage = "";
-  artImg.dataset.current = "";
+  artImg.dataset.current = fallbackArt;
 };
 
 // ── Connection dot ─────────────────────────────────────────
