@@ -7,74 +7,100 @@
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="stylesheet" href="/static/style.css">
-  <script src="https://cdn.jsdelivr.net/npm/node-vibrant@3.2.1-alpha.1/dist/vibrant.min.js"></script>
 </head>
 <body>
   <input type="checkbox" switch id="haptic" style="display:none" aria-hidden="true">
   <label id="haptic-label" for="haptic" style="display:none" aria-hidden="true"></label>
-  <main class="page">
-    <section class="now-playing card">
-      <div class="art-wrap">
-        <img id="art" src="/static/noartworkfound.svg" alt="artwork" crossorigin="anonymous" />
-      </div>
-      <div class="meta">
-        <div id="title" class="title">Title</div>
-        <div id="artist" class="artist">Artist</div>
-        <div id="album" class="album">Album</div>
-        <div id="status" class="status">Status</div>
-      </div>
-    </section>
 
-    <section class="scrubber card">
-      <div class="scrub-times">
-        <span id="current-time">0:00</span>
-        <span id="total-time">0:00</span>
-      </div>
-      <input id="position" type="range" min="0" max="0" value="0" step="1000" />
-      <div class="row controls-row">
-        <button id="replay10" class="icon-ghost" aria-label="Replay 10 seconds">
-          <img src="/static/replay10.svg" alt="Replay 10 seconds" class="icon-img" />
-        </button>
-        <button id="prev">Prev</button>
-        <button id="playpause" class="icon-btn" aria-label="Play/Pause">
-          <span id="playpause-icon" class="icon icon-play" aria-hidden="true"></span>
-        </button>
-        <button id="next">Next</button>
-        <button id="forward10" class="icon-ghost" aria-label="Forward 10 seconds">
-          <img src="/static/forward10.svg" alt="Forward 10 seconds" class="icon-img" />
-        </button>
-      </div>
-    </section>
+  <div class="bg-art" id="bg-art"></div>
 
-    <section class="controls">
-      <div class="row">
-        <button id="vol-down">Vol -</button>
-        <input id="volume" type="range" min="0" max="100" step="1" />
-        <button id="vol-up">Vol +</button>
-        <button id="mute" class="icon-btn" aria-label="Mute/Unmute">
-          <img id="mute-icon" class="icon-img" src="/static/volume_up_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg" alt="Volume up" />
-        </button>
-      </div>
-    </section>
+  <div class="app">
 
-    <section class="top panel">
-      <div class="inline">
-        <input id="token" type="password" placeholder="Token (optional)" />
-        <button id="connect">Connect</button>
-      </div>
-      <div class="inline">
-        <label for="player">Player:</label>
-        <select id="player"></select>
-        <button id="refresh">Refresh</button>
-      </div>
-    </section>
-  </main>
+    <!-- Now Playing -->
+    <div class="panel" id="panel-nowplaying">
+      <div class="connection-dot" id="connection-dot" title="Reconnect"></div>
+      <div class="np-scroll">
 
-  <div class="sticky">
-    <div id="status-line">
-      <span id="status-text">Disconnected</span>
-      <img id="connection-icon" class="connection-icon" src="/static/disconnected.svg" alt="Disconnected" />
+        <div class="art-wrap">
+          <img id="art" src="" alt="Album art" crossorigin="anonymous" />
+          <div class="art-placeholder" id="art-placeholder">♫</div>
+        </div>
+
+        <div class="meta">
+          <div class="track-title" id="title">—</div>
+          <div class="track-sub" id="artist"></div>
+        </div>
+
+        <div class="progress-wrap">
+          <div class="progress-times">
+            <span id="current-time">0:00</span>
+            <span id="total-time">0:00</span>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" id="progress-fill"></div>
+            <input type="range" id="position" min="0" max="0" value="0" step="1000">
+          </div>
+        </div>
+
+        <div class="transport">
+          <button id="prev" class="transport-ghost" aria-label="Previous">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+          </button>
+          <button id="replay10" class="transport-ghost" aria-label="Replay 10 seconds">
+            <img src="/static/replay10.svg" alt="Replay 10" />
+          </button>
+          <button id="playpause" class="play-btn" aria-label="Play/Pause">
+            <svg class="icon-play" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+            <svg class="icon-pause hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          </button>
+          <button id="forward10" class="transport-ghost" aria-label="Forward 10 seconds">
+            <img src="/static/forward10.svg" alt="Forward 10" />
+          </button>
+          <button id="next" class="transport-ghost" aria-label="Next">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          </button>
+        </div>
+
+        <div class="volume-wrap">
+          <img src="/static/volume_mute_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg" class="vol-icon" alt="Volume low" />
+          <input type="range" id="volume" min="0" max="100" step="1">
+          <img src="/static/volume_up_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24.svg" class="vol-icon" alt="Volume high" />
+        </div>
+
+      </div>
     </div>
+
+    <!-- Settings -->
+    <div class="panel hidden" id="panel-settings">
+      <div class="np-scroll">
+        <div class="settings-header">Settings</div>
+
+        <div class="settings-section">
+          <div class="settings-label">Connection</div>
+          <input type="password" id="token" placeholder="Token (optional)">
+          <button id="connect">Save &amp; Connect</button>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-label">Player</div>
+          <select id="player"></select>
+          <button id="refresh">Refresh</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab bar -->
+    <nav class="tab-bar">
+      <button class="tab-btn active" data-tab="nowplaying">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+        <span>Now Playing</span>
+      </button>
+      <button class="tab-btn" data-tab="settings">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+
   </div>
 
   <script src="/static/app.js"></script>
